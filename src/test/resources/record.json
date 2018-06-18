@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "id": "123",
+    "dt": "2018-05-22T18:23:16+00:00",
+    "schema_uri": "/schema.json"
+  },
+  "page_id": 1,
+  "rev_content_model": "text",
+  "list_field": [
+    "hi",
+    "there"
+  ]
+}

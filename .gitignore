@@ -1,0 +1,11 @@
+dist
+*classes
+target/
+build/
+build_eclipse/
+out/
+project/boot/
+.idea
+*.iml
+.project
+.settings
