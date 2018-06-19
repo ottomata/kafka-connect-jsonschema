@@ -122,23 +122,46 @@ public class JsonSchemaConverter extends JsonConverter {
     public SchemaAndValue toConnectData(String topic, byte[] value) {
         // Convert value to JsonNode.
 
+        JsonNode jsonValue;
         try {
-            JsonNode jsonValue = deserializer.deserialize(topic, value);
+            jsonValue = deserializer.deserialize(topic, value);
 
             if (jsonValue == null) {
                 return SchemaAndValue.NULL;
             }
-
-
-            Schema connectSchema = asConnectSchema(getSchemaURI(jsonValue));
-            Object connectValue = convertToConnect(connectSchema, jsonValue);
-            return new SchemaAndValue(connectSchema, connectValue);
         } catch (SerializationException e) {
             throw new DataException("Converting byte[] to Kafka Connect data failed due to serialization error: ", e);
         }
-        catch (Exception e) {
-            throw new DataException(e.getMessage());
+
+        Schema connectSchema = null;
+        Object connectValue = null;
+        try {
+            // TODO change this to call method on configured implemented interface type
+            connectSchema = connectSchemaFromJsonValue(jsonValue);
+            connectValue  = convertToConnect(connectSchema, jsonValue);
         }
+        catch (Exception e) {
+            throw new DataException("Caught Exception while converting to connect:\n" + connectSchema + "\n" + connectValue, e);
+        }
+
+        return new SchemaAndValue(connectSchema, connectValue);
+    }
+
+    // TODO:
+    // getJsonSchema
+    // getJsonSchemaVersion
+    // getJsonSchemaName
+    // infer additional properties not in schema??
+
+
+    // TODO this is the implementable interface.  This should move to a URISchemaResolver class
+    public Schema connectSchemaFromJsonValue(JsonNode jsonValue) throws java.net.URISyntaxException, IOException, com.github.fge.jsonschema.core.exceptions.ProcessingException {
+        return asConnectSchema(getSchemaURI(jsonValue), getJsonSchemaVersion(jsonValue));
+    }
+
+    public Integer getJsonSchemaVersion(JsonNode jsonValue) throws java.net.URISyntaxException {
+        String[] uriComponents = getSchemaURI(jsonValue).toString().split("/");
+        return Integer.parseInt(uriComponents[uriComponents.length - 1]);
     }
 
     /**
@@ -187,12 +210,14 @@ public class JsonSchemaConverter extends JsonConverter {
     }
 
 
-    public Schema asConnectSchema(URI schemaURI) throws java.net.URISyntaxException, IOException, com.github.fge.jsonschema.core.exceptions.ProcessingException {
+
+    public Schema asConnectSchema(URI schemaURI, Integer version) throws java.net.URISyntaxException, IOException, com.github.fge.jsonschema.core.exceptions.ProcessingException {
         Schema cachedConnectSchema = toConnectSchemaCache.get(schemaURI);
         if (cachedConnectSchema != null)
             return cachedConnectSchema;
 
-        Schema connectSchema = asConnectSchema(getJsonSchema(schemaURI));
+
+        Schema connectSchema = asConnectSchema(getJsonSchema(schemaURI), version);
 
 
         // TODO: if schemaURI is versionless, should we expire?  Should we infer and set the version?
@@ -203,10 +228,14 @@ public class JsonSchemaConverter extends JsonConverter {
 
     @Override
     public Schema asConnectSchema(JsonNode jsonSchema) {
-        return asConnectSchema(jsonSchema, null, true);
+        return asConnectSchema(jsonSchema, null, true, null);
     }
 
-    public Schema asConnectSchema(JsonNode jsonSchema, String fieldName, Boolean required) {
+    public Schema asConnectSchema(JsonNode jsonSchema, Integer version) {
+        return asConnectSchema(jsonSchema, null, true, version);
+    }
+
+    public Schema asConnectSchema(JsonNode jsonSchema, String fieldName, Boolean required, Integer version) {
         final String typeField = "type";
         final String itemsField = "items";
         final String propertiesField = "properties";
@@ -218,6 +247,12 @@ public class JsonSchemaConverter extends JsonConverter {
 
         if (jsonSchema.isNull())
             return null;
+
+
+        if (fieldName == null && jsonSchema.hasNonNull(titleField)) {
+            // TODO: make a sanitizeFieldName method?
+            fieldName = jsonSchema.get(titleField).textValue().replace('/', '_');
+        }
 
         JsonNode schemaTypeNode = jsonSchema.get(typeField);
         if (schemaTypeNode == null || !schemaTypeNode.isTextual())
@@ -256,11 +291,11 @@ public class JsonSchemaConverter extends JsonConverter {
 
                 // Arrays must specify the type of their elements.
                 if (itemsSchema == null || itemsSchema.isNull())
-                    throw new DataException("Array schema did not specify the items type");
+                    throw new DataException(fieldName + " array schema did not specify the items type");
 
                 // Arrays must only use a single type, not tuple validation.
                 if (!itemsSchema.isObject() || !itemsSchema.has("type"))
-                    throw new DataException("Array schema must specify the items type, e.g. \"items\": { \"type\": \"string\"");
+                    throw new DataException(fieldName + " array schema must specify the items type for field, e.g. \"items\": { \"type\": \"string\"");
 
                 builder = SchemaBuilder.array(asConnectSchema(itemsSchema));
                 if (jsonSchema.hasNonNull(defaultField))
@@ -280,11 +315,11 @@ public class JsonSchemaConverter extends JsonConverter {
                 JsonNode properties = jsonSchema.get(propertiesField);
 
                 if (properties == null || !properties.isObject())
-                    throw new DataException("Struct schema's \"properties\" is not an object.");
+                    throw new DataException(fieldName + " struct schema's \"properties\" is not an object.");
 
                 JsonNode requiredFieldList = jsonSchema.get(requiredField);
                 if (requiredFieldList != null && !requiredFieldList.isArray()) {
-                    throw new DataException("Struct schema's \"required\" is not an array.");
+                    throw new DataException(fieldName + " struct schema's \"required\" is not an array.");
                 }
 
                 Iterator<Map.Entry<String,JsonNode>> fields = properties.fields();
@@ -300,7 +335,7 @@ public class JsonSchemaConverter extends JsonConverter {
                     );
                     builder.field(
                         subFieldName,
-                        asConnectSchema(field.getValue(), subFieldName, subFieldRequired)
+                        asConnectSchema(field.getValue(), subFieldName, subFieldRequired, null)
                     );
                 }
                 break;
@@ -312,9 +347,11 @@ public class JsonSchemaConverter extends JsonConverter {
         if (fieldName != null) {
             builder.name(fieldName);
         }
-        else if (jsonSchema.hasNonNull(titleField)) {
-            builder.name(jsonSchema.get(titleField).textValue());
+
+        if (version != null) {
+            builder.version(version);
         }
+
 
         // Fields from JSON schema are default optional.
         if (required) {
@@ -588,12 +625,12 @@ public class JsonSchemaConverter extends JsonConverter {
         final Schema.Type schemaType;
         if (schema != null) {
             schemaType = schema.type();
-            if (jsonValue.isNull()) {
+            if (jsonValue == null || jsonValue.isNull()) {
                 if (schema.defaultValue() != null)
                     return schema.defaultValue(); // any logical type conversions should already have been applied
                 if (schema.isOptional())
                     return null;
-                throw new DataException("Invalid null value for required " + schemaType +  " field");
+                throw new DataException("Invalid null value for required " + schemaType +  " field " + schema.name() + "\n" + schema.toString());
             }
         } else {
             switch (jsonValue.getNodeType()) {
@@ -612,8 +649,10 @@ public class JsonSchemaConverter extends JsonConverter {
                 case ARRAY:
                     schemaType = Schema.Type.ARRAY;
                     break;
+                // All JSON objects need to be Structs.  JSON does not differentiate
+                // between maps and objects.
                 case OBJECT:
-                    schemaType = Schema.Type.MAP;
+                    schemaType = Schema.Type.STRUCT;
                     break;
                 case STRING:
                     schemaType = Schema.Type.STRING;

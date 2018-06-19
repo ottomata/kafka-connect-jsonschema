@@ -26,6 +26,11 @@ public class JsonSchemaConverterConfig extends ConverterConfig {
     private static final String SCHEMAS_CACHE_SIZE_DOC = "The maximum number of schemas that can be cached in this converter instance.";
     private static final String SCHEMAS_CACHE_SIZE_DISPLAY = "Schema Cache Size";
 
+    // always false.  Here 'schemas.enable' refers to Kafka Connect's custom envelope
+    // schema, which JsonSchemaConverter does not use.  However, JsonSchemaConverter
+    // extends from JsonConverter in order to not reimplement some methods that work
+    // as is if the Connect Schema is provided.
+    private static final String SCHEMAS_ENABLE_CONFIG = "schemas.enable";
 
     private final static ConfigDef CONFIG;
 
@@ -46,6 +51,12 @@ public class JsonSchemaConverterConfig extends ConverterConfig {
         CONFIG.define(SCHEMAS_CACHE_SIZE_CONFIG, Type.INT, SCHEMAS_CACHE_SIZE_DEFAULT,
             Importance.HIGH, SCHEMAS_CACHE_SIZE_DOC, group,
             orderInGroup++, Width.MEDIUM, SCHEMAS_CACHE_SIZE_DISPLAY
+        );
+
+        // Hardcoded to false
+        CONFIG.define(SCHEMAS_ENABLE_CONFIG, Type.BOOLEAN, false,
+            Importance.HIGH, "", group,
+            orderInGroup++, Width.MEDIUM, ""
         );
     }
 
