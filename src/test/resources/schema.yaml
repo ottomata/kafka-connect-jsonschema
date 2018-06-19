@@ -1,7 +1,7 @@
+$schema: http://json-schema.org/draft-04/schema#
 title: mediawiki/revision/create
 description: >
   Represents a MW Revision Create event.
-$schema: http://json-schema.org/draft-04/schema#
 additionalProperties: false
 type: object
 properties:

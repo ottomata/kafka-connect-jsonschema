@@ -178,11 +178,9 @@ public class JsonSchemaConverter extends JsonConverter {
 
     // TODO: better exception handling.
     public JsonNode getJsonSchema(URI schemaURI) throws java.net.URISyntaxException, IOException, com.github.fge.jsonschema.core.exceptions.ProcessingException {
-        // TODO get fancy andy use URITranslator to resolve relative $refs?
-        SchemaTree schemaTree = schemaLoader.get(schemaURI);
         YAMLParser yamlParser = yamlFactory.createParser(schemaURI.toURL());
-
         // Use SchemaLoader so we resolve any JsonRefs in the JSONSchema.
+        // TODO get fancy andy use URITranslator to resolve relative $refs?
         return schemaLoader.load(objectMapper.readTree(yamlParser)).getBaseNode();
     }
 
