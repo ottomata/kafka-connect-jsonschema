@@ -6,7 +6,9 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 
+import com.fasterxml.jackson.dataformat.yaml.YAMLParser;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.cache.Cache;
 import org.apache.kafka.common.cache.LRUCache;
@@ -62,22 +64,15 @@ public class JsonSchemaConverter extends JsonConverter {
     private final JsonSerializer serializer = new JsonSerializer();
     private final JsonDeserializer deserializer = new JsonDeserializer();
 
-    private final JsonSchemaFactory factory = JsonSchemaFactory.byDefault();
+//    private final JsonSchemaFactory factory = JsonSchemaFactory.byDefault();
 
-//        final JsonNode jsonSchema = new ObjectMapper().readTree(new URL(schemaURI));
     private final SchemaLoader schemaLoader = new SchemaLoader();
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final YAMLFactory  yamlFactory  = new YAMLFactory();
+
 
     protected Cache<URI, Schema> toConnectSchemaCache;
 
-    // TODO: Do we want to enable conversion from Connect Schema to connect 'JsonConverter'
-    // custom envelop schema?
-    //private Cache<Schema, ObjectNode> fromConnectSchemaCache;
-
-
-//    @Override
-//    public ConfigDef config() {
-//        return new JsonSchemaConverterConfig.configDef();
-//    }
 
     @Override
     public void configure(Map<String, ?> configs) {
@@ -101,16 +96,7 @@ public class JsonSchemaConverter extends JsonConverter {
     }
 
 
-//    /**
-//     * Convert a Kafka Connect data object to a native object for serialization.
-//     * @param topic the topic associated with the data
-//     * @param schema the schema for the value
-//     * @param value the value to convert
-//     * @return the serialized value
-//     */
-//    public byte[] fromConnectData(String topic, Schema schema, Object value) {
-//        return new byte['0'];
-//    }
+    // TODO Docs about how fromConnectData is implemented by parent class JsonConverter.
 
     /**
      * Convert a native object to a Kafka Connect data object.
@@ -130,7 +116,9 @@ public class JsonSchemaConverter extends JsonConverter {
                 return SchemaAndValue.NULL;
             }
         } catch (SerializationException e) {
-            throw new DataException("Converting byte[] to Kafka Connect data failed due to serialization error: ", e);
+            throw new DataException(
+                "Converting byte[] to Kafka Connect data failed due to serialization error: ", e
+            );
         }
 
         Schema connectSchema = null;
@@ -139,9 +127,15 @@ public class JsonSchemaConverter extends JsonConverter {
             // TODO change this to call method on configured implemented interface type
             connectSchema = connectSchemaFromJsonValue(jsonValue);
             connectValue  = convertToConnect(connectSchema, jsonValue);
+
+            // TODO: do we want to (configruably) validate jsonValue using JsonSchema with JsonSchemaFactory???
         }
         catch (Exception e) {
-            throw new DataException("Caught Exception while converting to connect:\n" + connectSchema + "\n" + connectValue, e);
+            throw new DataException(
+                "Caught Exception while converting to connect:\n" +
+                connectSchema + "\n" + connectValue,
+                e
+            );
         }
 
         return new SchemaAndValue(connectSchema, connectValue);
@@ -159,9 +153,17 @@ public class JsonSchemaConverter extends JsonConverter {
         return asConnectSchema(getSchemaURI(jsonValue), getJsonSchemaVersion(jsonValue));
     }
 
+    // TODO this should be imlementable too.
     public Integer getJsonSchemaVersion(JsonNode jsonValue) throws java.net.URISyntaxException {
         String[] uriComponents = getSchemaURI(jsonValue).toString().split("/");
-        return Integer.parseInt(uriComponents[uriComponents.length - 1]);
+
+        try {
+            return Integer.parseInt(uriComponents[uriComponents.length - 1]);
+        }
+        catch (NumberFormatException e) {
+            // TODO: log!
+            return null;
+        }
     }
 
     /**
@@ -176,37 +178,12 @@ public class JsonSchemaConverter extends JsonConverter {
 
     // TODO: better exception handling.
     public JsonNode getJsonSchema(URI schemaURI) throws java.net.URISyntaxException, IOException, com.github.fge.jsonschema.core.exceptions.ProcessingException {
-
-        // TODO make this call a configurable plugin class
-//        // Get schema URI from value.
-//        String schemaURI= "/.../";
-//
-////        SchemaLoader loader = new SchemaLoader();
-//
-//
-//
-//        // curl schema URI and instantiate JsonSchema
-////        final JsonNode jsonSchema = new ObjectMapper().readTree(new URL(schemaURI));
-//        /// OR
-////        SchemaTree tree = loader.get(new URI(schemaURI));
-////        JsonNode treeNode = tree.getBaseNode()
-//        // this is probably only useful for validating
-////        JsonSchema jsonSchema = JsonSchemaFactory.byDefault().getJsonSchema(treeNode);
-//
-//
-//
-////        JsonSchema schema = factory.getJsonSchema(schemaURI);
-//
-//
-////        val schemaGenerator = new SchemaGenerator()
-
-
-        // Use SchemaLoader so we resolve any JsonRefs.
+        // TODO get fancy andy use URITranslator to resolve relative $refs?
         SchemaTree schemaTree = schemaLoader.get(schemaURI);
-        return schemaTree.getBaseNode();
+        YAMLParser yamlParser = yamlFactory.createParser(schemaURI.toURL());
 
-//        JsonNode jsonSchema = new ObjectMapper().readTree(schemaURI.toURL());
-
+        // Use SchemaLoader so we resolve any JsonRefs in the JSONSchema.
+        return schemaLoader.load(objectMapper.readTree(yamlParser)).getBaseNode();
     }
 
 
@@ -235,18 +212,23 @@ public class JsonSchemaConverter extends JsonConverter {
         return asConnectSchema(jsonSchema, null, true, version);
     }
 
-    public Schema asConnectSchema(JsonNode jsonSchema, String fieldName, Boolean required, Integer version) {
-        final String typeField = "type";
-        final String itemsField = "items";
-        final String propertiesField = "properties";
-        final String requiredField = "required";
-        final String titleField = "title";
-        final String descriptionField = "description";
-        final String defaultField = "default";
-
-
+    public Schema asConnectSchema(
+        JsonNode jsonSchema,
+        String fieldName,
+        Boolean required,
+        Integer version
+    ) {
         if (jsonSchema.isNull())
             return null;
+
+        // TODO move these to top level static?
+        final String typeField          = "type";
+        final String itemsField         = "items";
+        final String propertiesField    = "properties";
+        final String requiredField      = "required";
+        final String titleField         = "title";
+        final String descriptionField   = "description";
+        final String defaultField       = "default";
 
 
         if (fieldName == null && jsonSchema.hasNonNull(titleField)) {
@@ -352,7 +334,6 @@ public class JsonSchemaConverter extends JsonConverter {
             builder.version(version);
         }
 
-
         // Fields from JSON schema are default optional.
         if (required) {
             builder.required();
@@ -372,15 +353,6 @@ public class JsonSchemaConverter extends JsonConverter {
 
         // TODO Do we want to validate using factory?  Should this be configurable?
 
-
-//        JsonNode schemaVersionNode = jsonSchema.get(JsonSchema.SCHEMA_VERSION_FIELD_NAME);
-//        if (schemaVersionNode != null && schemaVersionNode.isIntegralNumber()) {
-//            builder.version(schemaVersionNode.intValue());
-//        }
-
-//        JsonNode schemaDefaultNode = jsonSchema.get(JsonSchema.SCHEMA_DEFAULT_FIELD_NAME);
-//        if (schemaDefaultNode != null)
-//            builder.defaultValue(convertToConnect(builder, schemaDefaultNode));
 
         return builder.build();
 
@@ -687,17 +659,5 @@ public class JsonSchemaConverter extends JsonConverter {
     private interface LogicalTypeConverter {
         Object convert(Schema schema, Object value);
     }
-
-
-
-//    private static List<T> jsonNodeAsArray(JsonNode jsonList, Schema.Type type) {
-//
-//
-//
-//        for (JsonNode element : jsonList) {
-//
-//        }
-//    }
-
 
 }

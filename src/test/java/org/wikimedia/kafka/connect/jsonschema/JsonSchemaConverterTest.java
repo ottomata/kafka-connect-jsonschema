@@ -3,32 +3,18 @@ package org.wikimedia.kafka.connect.jsonschema;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import org.apache.commons.io.FileUtils;
-import org.apache.kafka.common.utils.Utils;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import org.apache.kafka.connect.data.*;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.apache.kafka.common.cache.Cache;
-import org.apache.kafka.connect.errors.DataException;
 
 //import org.powermock.reflect.Whitebox;
 
 import java.nio.file.Files;
 import java.io.File;
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
-import java.math.BigDecimal;
-import java.math.BigInteger;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.net.URL;
-import java.nio.ByteBuffer;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 
@@ -41,19 +27,25 @@ public class JsonSchemaConverterTest {
     File resourcesDirectory = new File("src/test/resources");
     String schemaURIPrefix = "file://" + resourcesDirectory.getAbsolutePath();
 
-    File schemaFile = new File("src/test/resources/schema.json");
-    File recordFile = new File("src/test/resources/record.json");
+    File schemaFileJson = new File("src/test/resources/schema.json");
+    File recordFileWithJsonSchema = new File("src/test/resources/record.json");
+
+    File schemaFileYaml = new File("src/test/resources/schema.yaml");
+    // The record in this file has its schema_uri set to a .yaml file.
+    File recordFileWithYamlSchema = new File("src/test/resources/record_with_schema_yaml.json");
 
     byte[]   recordBytes;
-    JsonNode record;
-    JsonNode schema;
+    JsonNode recordWithJsonSchema;
+    JsonNode recordWithYamlSchema;
+    JsonNode schemaJson;
+    JsonNode schemaYaml;
 
     static Schema expectedSchema;
     static Struct expectedValue;
 
     static {
         expectedSchema = SchemaBuilder.struct()
-            .name("mediawiki/revision/create")
+            .name("mediawiki_revision_create")
             .field("meta", SchemaBuilder.struct()
                 .name("meta").required()
                 .field("id", SchemaBuilder.string().name("id").required())
@@ -115,9 +107,15 @@ public class JsonSchemaConverterTest {
 
         converter.configure(conf, false);
 
-        schema      = new ObjectMapper().readTree(schemaFile);
-        recordBytes = Files.readAllBytes(recordFile.toPath());
-        record      = new ObjectMapper().readTree(recordFile);
+
+        ObjectMapper objectMapper = new ObjectMapper();
+
+        schemaJson  = objectMapper.readTree(schemaFileJson);
+        recordBytes = Files.readAllBytes(recordFileWithJsonSchema.toPath());
+        recordWithJsonSchema      = objectMapper.readTree(recordFileWithJsonSchema);
+
+        schemaYaml  = objectMapper.readTree(new YAMLFactory().createParser(schemaFileYaml));
+        recordWithYamlSchema = objectMapper.readTree(recordFileWithYamlSchema);
     }
 
 
@@ -133,21 +131,34 @@ public class JsonSchemaConverterTest {
     public void getSchemaURI() throws Exception {
         assertEquals(
             schemaURIPrefix + "/schema.json",
-                converter.getSchemaURI(record).toString()
+            converter.getSchemaURI(recordWithJsonSchema).toString()
+        );
+        assertEquals(
+            schemaURIPrefix + "/schema.yaml",
+            converter.getSchemaURI(recordWithYamlSchema).toString()
         );
     }
 
     @Test
     public void getJsonSchema() throws Exception {
        assertEquals(
-           new ObjectMapper().readTree(schemaFile),
-           converter.getJsonSchema(converter.getSchemaURI(record))
+           schemaJson,
+           converter.getJsonSchema(converter.getSchemaURI(recordWithJsonSchema))
        );
     }
 
     @Test
+    public void getJsonSchemaFromYaml() throws Exception {
+
+        assertEquals(
+            schemaYaml,
+            converter.getJsonSchema(converter.getSchemaURI(recordWithYamlSchema))
+        );
+    }
+
+    @Test
     public void asConnectSchema() throws Exception {
-        Schema connectSchema = converter.asConnectSchema(schema);
+        Schema connectSchema = converter.asConnectSchema(schemaJson);
         assertSchemasEqual(expectedSchema, connectSchema);
     }
 
