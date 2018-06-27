@@ -1,4 +1,4 @@
-# Kafka Connect JSONSChema
+# Kafka Connect JsonSchema Converter
 
 Uses JSONSchema to convert from JSON messages in Kafka to Kafka ConnectRecords.
 
