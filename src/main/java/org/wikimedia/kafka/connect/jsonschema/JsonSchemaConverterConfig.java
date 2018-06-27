@@ -6,9 +6,8 @@ import org.apache.kafka.common.config.ConfigDef.Type;
 import org.apache.kafka.common.config.ConfigDef.Width;
 import org.apache.kafka.connect.storage.ConverterConfig;
 
-import org.apache.kafka.connect.json.JsonConverterConfig;
-
 import java.util.Map;
+import java.util.regex.Pattern;
 
 public class JsonSchemaConverterConfig extends ConverterConfig {
     public static  final String SCHEMA_URI_FIELD_CONFIG  = "schema.uri.field";
@@ -16,14 +15,19 @@ public class JsonSchemaConverterConfig extends ConverterConfig {
     private static final String SCHEMA_URI_FIELD_DOC     = "Dotted name of schema uri field in JSON message";
     private static final String SCHEMA_URI_FIELD_DISPLAY = "Schema URI Field Name";
 
-    public static  final String SCHEMA_URI_PREFIX_CONFIG   = "schema.uri.prefix";
+    public static  final String SCHEMA_URI_PREFIX_CONFIG  = "schema.uri.prefix";
     public static  final String SCHEMA_URI_PREFIX_DEFAULT = "";
     private static final String SCHEMA_URI_PREFIX_DOC     = "Prefix added to every schema.uri.field";
     private static final String SCHEMA_URI_PREFIX_DISPLAY = "Schema URI Prefix";
 
-    public static final String SCHEMAS_CACHE_SIZE_CONFIG = "schemas.cache.size";
-    public static final int SCHEMAS_CACHE_SIZE_DEFAULT = 1000;
-    private static final String SCHEMAS_CACHE_SIZE_DOC = "The maximum number of schemas that can be cached in this converter instance.";
+    public static  final String SCHEMA_URI_VERSION_REGEX_CONFIG  = "schema.uri.version.regex";
+    public static  final String SCHEMA_URI_VERSION_REGEX_DEFAULT = "([\\w\\-\\./:@]+)/(?<version>\\d+)";
+    private static final String SCHEMA_URI_VERSION_REGEX_DOC     = "This regex is used to extract the schema version from the schema URI. There should be a named capture group for 'version'.";
+    private static final String SCHEMA_URI_VERSION_REGEX_DISPLAY = "Schema URI Version Regex";
+
+    public static  final String SCHEMAS_CACHE_SIZE_CONFIG  = "schemas.cache.size";
+    public static  final int    SCHEMAS_CACHE_SIZE_DEFAULT = 1000;
+    private static final String SCHEMAS_CACHE_SIZE_DOC     = "The maximum number of schemas that can be cached in this converter instance.";
     private static final String SCHEMAS_CACHE_SIZE_DISPLAY = "Schema Cache Size";
 
     // always false.  Here 'schemas.enable' refers to Kafka Connect's custom envelope
@@ -53,6 +57,11 @@ public class JsonSchemaConverterConfig extends ConverterConfig {
             orderInGroup++, Width.MEDIUM, SCHEMAS_CACHE_SIZE_DISPLAY
         );
 
+        CONFIG.define(SCHEMA_URI_VERSION_REGEX_CONFIG, Type.STRING, SCHEMA_URI_VERSION_REGEX_DEFAULT,
+                Importance.HIGH, SCHEMA_URI_VERSION_REGEX_DOC, group,
+                orderInGroup++, Width.MEDIUM, SCHEMA_URI_VERSION_REGEX_DISPLAY
+        );
+
         // Hardcoded to false
         CONFIG.define(SCHEMAS_ENABLE_CONFIG, Type.BOOLEAN, false,
             Importance.HIGH, "", group,
@@ -76,6 +85,9 @@ public class JsonSchemaConverterConfig extends ConverterConfig {
         return getString(SCHEMA_URI_PREFIX_CONFIG);
     }
 
+    public Pattern schemaURIVersionRegex() {
+        return Pattern.compile(getString(SCHEMA_URI_VERSION_REGEX_CONFIG));
+    }
 
     /**
      * Get the cache size.

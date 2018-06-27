@@ -1,12 +1,9 @@
 package org.wikimedia.kafka.connect.jsonschema;
 
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import org.apache.kafka.connect.data.*;
-
-//import org.powermock.reflect.Whitebox;
 
 import java.nio.file.Files;
 import java.io.File;
@@ -71,6 +68,8 @@ public class JsonSchemaConverterTest {
         expectedValue.put("list_field", listField);
     }
 
+    static String topic = "mediawiki.revision-create";
+
 
     public void assertSchemasEqual(Schema expected, Schema actual) {
         assertEquals(expected.type(),           actual.type(),          "type should match for field " + expected.name());
@@ -131,11 +130,30 @@ public class JsonSchemaConverterTest {
     public void getSchemaURI() throws Exception {
         assertEquals(
             schemaURIPrefix + "/schema.json",
-            converter.getSchemaURI(recordWithJsonSchema).toString()
+            converter.getSchemaURI(topic, recordWithJsonSchema).toString()
         );
         assertEquals(
             schemaURIPrefix + "/schema.yaml",
-            converter.getSchemaURI(recordWithYamlSchema).toString()
+            converter.getSchemaURI(topic, recordWithYamlSchema).toString()
+        );
+    }
+
+    @Test
+    public void getSchemaVersion() throws Exception {
+        assertNull(
+            converter.getSchemaVersion(topic, schemaURIPrefix + "/schema.json")
+        );
+        assertEquals(
+            new Integer(1),
+            converter.getSchemaVersion(topic, schemaURIPrefix + "/schema/1.json")
+        );
+        assertEquals(
+            new Integer(1),
+            converter.getSchemaVersion(topic, schemaURIPrefix + "/schema/1.yaml")
+        );
+        assertEquals(
+            new Integer(1),
+            converter.getSchemaVersion(topic, schemaURIPrefix + "/schema/1")
         );
     }
 
@@ -143,7 +161,7 @@ public class JsonSchemaConverterTest {
     public void getJsonSchema() throws Exception {
        assertEquals(
            schemaJson,
-           converter.getJsonSchema(converter.getSchemaURI(recordWithJsonSchema))
+           converter.getJsonSchema(converter.getSchemaURI(topic, recordWithJsonSchema))
        );
     }
 
@@ -152,7 +170,7 @@ public class JsonSchemaConverterTest {
 
         assertEquals(
             schemaYaml,
-            converter.getJsonSchema(converter.getSchemaURI(recordWithYamlSchema))
+            converter.getJsonSchema(converter.getSchemaURI(topic, recordWithYamlSchema))
         );
     }
 
@@ -164,12 +182,30 @@ public class JsonSchemaConverterTest {
 
     @Test
     public void toConnectData() throws Exception {
-        SchemaAndValue connectData = converter.toConnectData("test", recordBytes);
+        SchemaAndValue connectData = converter.toConnectData(topic, recordBytes);
 
         // Struct's toString uses the types and values to build a string.
         //  Assert that the returned Strings are equals, to avoid object instance comparision.
         assertEquals(expectedValue.toString(), connectData.value().toString(), "toConnectData should return exactly this value");
         assertSchemasEqual(expectedSchema, connectData.schema());
+        // TODO compare data?
+    }
+
+    @Test
+    public void fromConnectData() throws Exception {
+        SchemaAndValue connectData = converter.toConnectData(topic, recordBytes);
+
+        byte[] jsonBytes = converter.fromConnectData(
+                topic,
+                connectData.schema(),
+                connectData.value()
+        );
+
+        // Assert that the json record from the original file is the same
+        // as the one that Kafka Connect converted to Connect format and then back
+        // to json string bytes.  This should be handled by the parent
+        // JsonConverter in Kafka Connect.
+        assertEquals(recordWithJsonSchema.toString(), new String(jsonBytes));
     }
 
 }

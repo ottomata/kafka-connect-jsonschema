@@ -1,15 +1,25 @@
 package org.wikimedia.kafka.connect.jsonschema;
 
+
+import java.io.IOException;
+import java.net.URI;
+import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import com.fasterxml.jackson.core.JsonPointer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 
+import com.github.fge.jsonschema.core.load.SchemaLoader;
+
 import com.fasterxml.jackson.dataformat.yaml.YAMLParser;
-import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.cache.Cache;
 import org.apache.kafka.common.cache.LRUCache;
 import org.apache.kafka.common.cache.SynchronizedCache;
@@ -18,8 +28,8 @@ import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.data.Field;
-import org.apache.kafka.connect.data.ConnectSchema;
 import org.apache.kafka.connect.data.SchemaAndValue;
+import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.apache.kafka.connect.json.JsonSerializer;
 import org.apache.kafka.connect.json.JsonDeserializer;
 import org.apache.kafka.connect.json.JsonConverter;
@@ -28,64 +38,87 @@ import org.apache.kafka.connect.data.Time;
 import org.apache.kafka.connect.data.Decimal;
 import org.apache.kafka.connect.data.Date;
 import org.apache.kafka.connect.errors.DataException;
-import org.apache.kafka.connect.storage.Converter;
+import org.apache.kafka.connect.storage.ConverterConfig;
 import org.apache.kafka.connect.storage.ConverterType;
-import org.apache.kafka.connect.storage.HeaderConverter;
 import org.apache.kafka.connect.storage.StringConverterConfig;
 
 
-import java.net.URL;
-import java.net.URI;
 
-import com.github.fge.jsonschema.main.JsonSchema;
-import com.github.fge.jsonschema.main.JsonSchemaFactory;
-import com.github.fge.jsonschema.core.tree.SchemaTree;
-import com.github.fge.jsonschema.core.util.ValueHolder;
-import com.github.fge.jsonschema.core.load.SchemaLoader;
-
-
-import java.io.IOException;
-import java.math.BigDecimal;
-import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.EnumMap;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Map;
-
-
+/**
+ * Uses a schemaURI extracted from a JsonNode value to find the JSONSchema
+ * for the JsonNode value.  This JSONSchema is then converted into a Connect Schema,
+ * which is then used to convert the JsonNode value into a Connect value Java Object.
+ *
+ * This class extends from JsonConverter to take advantage of its implemented
+ * fromConnectData() method(s).  This class copy/pastes the convertToConnect logic
+ * from the parent JsonConverter, since those methods are private there.
+ */
 public class JsonSchemaConverter extends JsonConverter {
-    // TODO: save this a  a JsonPointer
-    private String schemaURIField = JsonSchemaConverterConfig.SCHEMA_URI_FIELD_DEFAULT;
+    /**
+     * Used to extract the schemaURI from each JSON value.
+     */
+    private JsonPointer schemaURIPointer = JsonPointer.compile(
+        JsonSchemaConverterConfig.SCHEMA_URI_FIELD_DEFAULT
+    );
+
+    /**
+     * This will be prefixed to every URI extracted from each JSON value to
+     * build a fully qualified URI.
+     */
     private String schemaURIPrefix = JsonSchemaConverterConfig.SCHEMA_URI_PREFIX_DEFAULT;
+
+    /**
+     * Pattern regex used to extract the schema version from the schema URI.
+     */
+    private Pattern schemaURIVersionPattern = Pattern.compile(
+        JsonSchemaConverterConfig.SCHEMA_URI_VERSION_REGEX_DEFAULT
+    );
+
     private int cacheSize = JsonSchemaConverterConfig.SCHEMAS_CACHE_SIZE_DEFAULT;
 
     private final JsonSerializer serializer = new JsonSerializer();
     private final JsonDeserializer deserializer = new JsonDeserializer();
-
-//    private final JsonSchemaFactory factory = JsonSchemaFactory.byDefault();
 
     private final SchemaLoader schemaLoader = new SchemaLoader();
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final YAMLFactory  yamlFactory  = new YAMLFactory();
 
 
-    protected Cache<URI, Schema> toConnectSchemaCache;
+    // This cache will be used to cache Scheams by schemaURIs.
+    // The parent JsonConverter toConnectSchemaCache will not be used.
+    // However, the parent JsonConverter fromConnectSchemaCache will be.
+    private Cache<String, Schema> toConnectSchemaCache;
 
+    // JSONSchema field names used to convert the JSONSchema to Connect Schema.
+    protected static final String typeField          = "type";
+    protected static final String itemsField         = "items";
+    protected static final String propertiesField    = "properties";
+    protected static final String requiredField      = "required";
+    protected static final String titleField         = "title";
+    protected static final String descriptionField   = "description";
+    protected static final String defaultField       = "default";
 
     @Override
     public void configure(Map<String, ?> configs) {
         JsonSchemaConverterConfig config = new JsonSchemaConverterConfig(configs);
-        schemaURIField  = config.schemaURIField();
-        schemaURIPrefix = config.schemaURIPrefix();
-        cacheSize       = config.schemaCacheSize();
+        schemaURIPointer        = JsonPointer.compile(config.schemaURIField());
+        schemaURIPrefix         = config.schemaURIPrefix();
+        schemaURIVersionPattern = config.schemaURIVersionRegex();
+        cacheSize               = config.schemaCacheSize();
 
         boolean isKey = config.type() == ConverterType.KEY;
         serializer.configure(configs, isKey);
         deserializer.configure(configs, isKey);
 
-        toConnectSchemaCache = new SynchronizedCache<>(new LRUCache<URI, Schema>(cacheSize));
+        toConnectSchemaCache = new SynchronizedCache<>(new LRUCache<String, Schema>(cacheSize));
+
+        // Configure the parent JsonConverter so it can use
+        // its fromConnectData() method.
+        Map jsonConverterConfigs  = new HashMap<String, String>();
+        jsonConverterConfigs.put(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG, "false");
+        jsonConverterConfigs.put(JsonConverterConfig.SCHEMAS_CACHE_SIZE_CONFIG, cacheSize);
+        jsonConverterConfigs.put(ConverterConfig.TYPE_CONFIG, config.type().getName());
+        super.configure(jsonConverterConfigs);
     }
 
     @Override
@@ -94,9 +127,6 @@ public class JsonSchemaConverter extends JsonConverter {
         conf.put(StringConverterConfig.TYPE_CONFIG, isKey ? ConverterType.KEY.getName() : ConverterType.VALUE.getName());
         configure(conf);
     }
-
-
-    // TODO Docs about how fromConnectData is implemented by parent class JsonConverter.
 
     /**
      * Convert a native object to a Kafka Connect data object.
@@ -107,7 +137,6 @@ public class JsonSchemaConverter extends JsonConverter {
     @Override
     public SchemaAndValue toConnectData(String topic, byte[] value) {
         // Convert value to JsonNode.
-
         JsonNode jsonValue;
         try {
             jsonValue = deserializer.deserialize(topic, value);
@@ -124,11 +153,10 @@ public class JsonSchemaConverter extends JsonConverter {
         Schema connectSchema = null;
         Object connectValue = null;
         try {
-            // TODO change this to call method on configured implemented interface type
-            connectSchema = connectSchemaFromJsonValue(jsonValue);
+            connectSchema = asConnectSchemaFromJsonValue(topic, jsonValue);
             connectValue  = convertToConnect(connectSchema, jsonValue);
-
-            // TODO: do we want to (configurably) validate jsonValue using JsonSchema with JsonSchemaFactory???
+            // TODO: do we want to (configurably) validate jsonValue
+            // using JsonSchema with JsonSchemaFactory???
         }
         catch (Exception e) {
             throw new DataException(
@@ -141,75 +169,35 @@ public class JsonSchemaConverter extends JsonConverter {
         return new SchemaAndValue(connectSchema, connectValue);
     }
 
-    // TODO:
-    // getJsonSchema
-    // getJsonSchemaVersion
-    // getJsonSchemaName
-    // infer additional properties not in schema??
-
-
-    // TODO this is the implementable interface.  This should move to a URISchemaResolver class
-    public Schema connectSchemaFromJsonValue(JsonNode jsonValue) throws java.net.URISyntaxException, IOException, com.github.fge.jsonschema.core.exceptions.ProcessingException {
-        return asConnectSchema(getSchemaURI(jsonValue), getJsonSchemaVersion(jsonValue));
-    }
-
-    // TODO this should be imlementable too.
-    public Integer getJsonSchemaVersion(JsonNode jsonValue) throws java.net.URISyntaxException {
-        String[] uriComponents = getSchemaURI(jsonValue).toString().split("/");
-
-        try {
-            return Integer.parseInt(uriComponents[uriComponents.length - 1]);
-        }
-        catch (NumberFormatException e) {
-            // TODO: log!
-            return null;
-        }
-    }
-
-    /**
-     *
-     * @param value
-     *
-     * @return
-     */
-    public URI getSchemaURI(JsonNode value) throws java.net.URISyntaxException {
-        return new URI(schemaURIPrefix + value.at(schemaURIField).asText());
-    }
-
-    // TODO: better exception handling.
-    public JsonNode getJsonSchema(URI schemaURI) throws java.net.URISyntaxException, IOException, com.github.fge.jsonschema.core.exceptions.ProcessingException {
-        YAMLParser yamlParser = yamlFactory.createParser(schemaURI.toURL());
-        // Use SchemaLoader so we resolve any JsonRefs in the JSONSchema.
-        // TODO get fancy andy use URITranslator to resolve relative $refs?
-        return schemaLoader.load(objectMapper.readTree(yamlParser)).getBaseNode();
-    }
-
-
-
-    public Schema asConnectSchema(URI schemaURI, Integer version) throws java.net.URISyntaxException, IOException, com.github.fge.jsonschema.core.exceptions.ProcessingException {
-        Schema cachedConnectSchema = toConnectSchemaCache.get(schemaURI);
-        if (cachedConnectSchema != null)
-            return cachedConnectSchema;
-
-
-        Schema connectSchema = asConnectSchema(getJsonSchema(schemaURI), version);
-
-
-        // TODO: if schemaURI is versionless, should we expire?  Should we infer and set the version?
-        // Should we just put an expiry time on items in the cache?
-        toConnectSchemaCache.put(schemaURI, connectSchema);
-        return connectSchema;
-    }
-
     @Override
+    /**
+     * Converts the provided jsonSchema into a Connect Schema.
+     * This assumes that the schema is versionless.
+     */
     public Schema asConnectSchema(JsonNode jsonSchema) {
         return asConnectSchema(jsonSchema, null, true, null);
     }
 
+    /**
+     * Converts the provided jsonSchema into a Connect Schema with the given schema version.
+     *
+     * @param jsonSchema
+     * @param version
+     * @return
+     */
     public Schema asConnectSchema(JsonNode jsonSchema, Integer version) {
         return asConnectSchema(jsonSchema, null, true, version);
     }
 
+    /**
+     * Converts the given jsonSchema with name fieldName and schema version to a Connect Schema.
+     *
+     * @param jsonSchema
+     * @param fieldName
+     * @param required
+     * @param version
+     * @return
+     */
     public Schema asConnectSchema(
         JsonNode jsonSchema,
         String fieldName,
@@ -219,20 +207,11 @@ public class JsonSchemaConverter extends JsonConverter {
         if (jsonSchema.isNull())
             return null;
 
-        // TODO move these to top level static?
-        final String typeField          = "type";
-        final String itemsField         = "items";
-        final String propertiesField    = "properties";
-        final String requiredField      = "required";
-        final String titleField         = "title";
-        final String descriptionField   = "description";
-        final String defaultField       = "default";
-
-
         if (fieldName == null && jsonSchema.hasNonNull(titleField)) {
             // TODO: make a sanitizeFieldName method?
-            fieldName = jsonSchema.get(titleField).textValue().replace('/', '_');
+            fieldName = jsonSchema.get(titleField).textValue();
         }
+        fieldName = sanitizeFieldName(fieldName);
 
         JsonNode schemaTypeNode = jsonSchema.get(typeField);
         if (schemaTypeNode == null || !schemaTypeNode.isTextual())
@@ -288,10 +267,6 @@ public class JsonSchemaConverter extends JsonConverter {
                     builder.name(fieldName);
                 }
 
-
-                // TODO: Do we need to handle things like patternProperites, anyOf, etc?
-                // I hope not!
-
                 JsonNode properties = jsonSchema.get(propertiesField);
 
                 if (properties == null || !properties.isObject())
@@ -346,9 +321,6 @@ public class JsonSchemaConverter extends JsonConverter {
 
         // TODO: If 'additionalProperties' is present, should we infer the rest of the schema
         // from other fields in the data?
-
-
-
         // TODO Do we want to validate using factory?  Should this be configurable?
 
 
@@ -356,6 +328,135 @@ public class JsonSchemaConverter extends JsonConverter {
 
     }
 
+
+
+    /**
+     * Extracts the json value's JSONSchema URI from the schemaURIPointer json pointer.
+     *
+     * @param topic
+     * @param value
+     * @return
+     * @throws DataException
+     */
+    public URI getSchemaURI(String topic, JsonNode value) throws DataException {
+        try {
+            return new URI(schemaURIPrefix + value.at(schemaURIPointer).textValue());
+        }
+        catch (java.net.URISyntaxException e) {
+            throw new DataException("Could not extract JSONSchema URI in field " + schemaURIPointer + " json value with prefix " + schemaURIPrefix, e);
+        }
+    }
+
+    /**
+     * Given a schemaURI, this will request the JSON or YAML content at that URI and
+     * parse it into a JsonNode.  $refs will be resolved.
+     *
+     * @param schemaURI
+     * @return
+     * @throws DataException
+     */
+    public JsonNode getJsonSchema(URI schemaURI) throws DataException {
+        YAMLParser yamlParser = null;
+        try {
+            yamlParser = yamlFactory.createParser(schemaURI.toURL());
+        }
+        catch (IOException e) {
+            throw new DataException("Failed parsing json schema returned from " + schemaURI, e);
+        }
+
+        // Use SchemaLoader so we resolve any JsonRefs in the JSONSchema.
+        try {
+            // TODO get fancy andy use URITranslator to resolve relative $refs?
+            return schemaLoader.load(objectMapper.readTree(yamlParser)).getBaseNode();
+        }
+        catch (IOException e) {
+            throw new DataException("Failed reading json schema returned from " + schemaURI, e);
+        }
+    }
+
+    /**
+     * Given the a jsonValue, this will request the JSONSchema referred to by the configured
+     * schemaURI in the jsonValue and convert it to a Connect Schema.  If the schema version
+     * is present in the schemaURI, the Connect Schema for the schemaURI will be cached.
+     * If it is versionless, then it will not be cached.
+     *
+     * @param topic
+     * @param jsonValue
+     * @return
+     * @throws IOException
+     * @throws com.github.fge.jsonschema.core.exceptions.ProcessingException
+     */
+    public Schema asConnectSchemaFromJsonValue(String topic, JsonNode jsonValue) throws IOException, com.github.fge.jsonschema.core.exceptions.ProcessingException {
+        URI schemaURI = getSchemaURI(topic, jsonValue);
+        String schemaURIString = schemaURI.toString();
+
+        Schema cachedConnectSchema = toConnectSchemaCache.get(schemaURIString);
+        if (cachedConnectSchema != null)
+            return cachedConnectSchema;
+
+        Integer schemaVersion = getSchemaVersion(topic, jsonValue);
+
+        Schema connectSchema = asConnectSchema(getJsonSchema(schemaURI), schemaVersion);
+
+        // Only cache this schema if the schema has a version.
+        if (schemaVersion != null) {
+            toConnectSchemaCache.put(schemaURIString, connectSchema);
+        }
+
+        return connectSchema;
+    }
+
+    public Integer getSchemaVersion(String topic, JsonNode value){
+        return getSchemaVersion(topic, getSchemaURI(topic, value));
+    }
+
+
+    /**
+     * Extracts the schema version from the schemaURI using the schemaURIVersionRegex.
+     *
+     * @param topic
+     * @param schemaURI
+     * @return
+     */
+    public Integer getSchemaVersion(String topic, URI schemaURI) throws DataException {
+        return getSchemaVersion(topic, schemaURI.toString());
+    }
+
+    /**
+     * Extracts the schema version from the schemaURIString using the schemaURIVersionRegex.
+     *
+     * @param topic
+     * @param schemaURIString
+     * @return
+     */
+    public Integer getSchemaVersion(String topic, String schemaURIString) throws DataException {
+        Matcher versionMatcher = schemaURIVersionPattern.matcher(schemaURIString);
+
+        Integer version = null;
+
+        // If we matched a schema version,
+        // then extract it from the match and parse it as an Integer.
+        if (versionMatcher.find()) {
+            String versionString = versionMatcher.group("version");
+            try {
+                version = Integer.parseInt(versionString);
+            }
+            catch (NumberFormatException e) {
+                throw new DataException("Failed parsing schema version " + versionString + " as an Integer.", e);
+            }
+        }
+
+        return version;
+    }
+
+
+    /**
+     * Given a Jackson ArrayNode, returns true if it contains the String value.
+     *
+     * @param list
+     * @param value
+     * @return
+     */
     private static boolean arrayNodeContainsTextValue(ArrayNode list, String value) {
         if (list == null) {
             return false;
@@ -371,17 +472,26 @@ public class JsonSchemaConverter extends JsonConverter {
     }
 
 
+    /**
+     * Replaces characters in fieldName that are not suitable for
+     * field names with underscores.  I.e. [/.-\s]will be replaced.
+     *
+     * @param fieldName
+     * @return
+     */
+    public String sanitizeFieldName(String fieldName) {
+        if (fieldName == null)
+            return fieldName;
+        else {
+            return fieldName.replaceAll("[/\\.\\s-]", "_");
+        }
+    }
 
 
-
-
-
-
-
-
-
-
-
+    //
+    // NOTE: Code below is copy/pasted from parent JsonConverter class, since these variables
+    //       and methods are private there.
+    //
 
     private static final Map<Schema.Type, JsonToConnectTypeConverter> TO_CONNECT_CONVERTERS = new EnumMap<>(Schema.Type.class);
 
@@ -548,48 +658,6 @@ public class JsonSchemaConverter extends JsonConverter {
             }
         });
     }
-
-    private static final HashMap<String, LogicalTypeConverter> TO_JSON_LOGICAL_CONVERTERS = new HashMap<>();
-    static {
-        TO_JSON_LOGICAL_CONVERTERS.put(Decimal.LOGICAL_NAME, new LogicalTypeConverter() {
-            @Override
-            public Object convert(Schema schema, Object value) {
-                if (!(value instanceof BigDecimal))
-                    throw new DataException("Invalid type for Decimal, expected BigDecimal but was " + value.getClass());
-                return Decimal.fromLogical(schema, (BigDecimal) value);
-            }
-        });
-
-        TO_JSON_LOGICAL_CONVERTERS.put(Date.LOGICAL_NAME, new LogicalTypeConverter() {
-            @Override
-            public Object convert(Schema schema, Object value) {
-                if (!(value instanceof java.util.Date))
-                    throw new DataException("Invalid type for Date, expected Date but was " + value.getClass());
-                return Date.fromLogical(schema, (java.util.Date) value);
-            }
-        });
-
-        TO_JSON_LOGICAL_CONVERTERS.put(Time.LOGICAL_NAME, new LogicalTypeConverter() {
-            @Override
-            public Object convert(Schema schema, Object value) {
-                if (!(value instanceof java.util.Date))
-                    throw new DataException("Invalid type for Time, expected Date but was " + value.getClass());
-                return Time.fromLogical(schema, (java.util.Date) value);
-            }
-        });
-
-        TO_JSON_LOGICAL_CONVERTERS.put(Timestamp.LOGICAL_NAME, new LogicalTypeConverter() {
-            @Override
-            public Object convert(Schema schema, Object value) {
-                if (!(value instanceof java.util.Date))
-                    throw new DataException("Invalid type for Timestamp, expected Date but was " + value.getClass());
-                return Timestamp.fromLogical(schema, (java.util.Date) value);
-            }
-        });
-    }
-
-
-
 
     private static Object convertToConnect(Schema schema, JsonNode jsonValue) {
         final Schema.Type schemaType;
