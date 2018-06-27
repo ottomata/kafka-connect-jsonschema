@@ -7,7 +7,7 @@ These schemas can be resolved over http://, or any protocol supported by java.ne
 This allows for integration between schemaed JSON data in Kafka with various
 Kafka connectors.
 
-JSONSchema too comprehensive a specification to be fully supported here. This converter
+JSONSchema is too comprehensive a specification to be fully supported here. This converter
 only examines the JSONSchema field types to build a Connect Schema. Fancy features
 like `additionalProperties`, `patternProperties`, ``oneOf`, `anyOf`, etc. are not supported.
 
