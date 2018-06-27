@@ -128,7 +128,7 @@ public class JsonSchemaConverter extends JsonConverter {
             connectSchema = connectSchemaFromJsonValue(jsonValue);
             connectValue  = convertToConnect(connectSchema, jsonValue);
 
-            // TODO: do we want to (configruably) validate jsonValue using JsonSchema with JsonSchemaFactory???
+            // TODO: do we want to (configurably) validate jsonValue using JsonSchema with JsonSchemaFactory???
         }
         catch (Exception e) {
             throw new DataException(
@@ -308,7 +308,7 @@ public class JsonSchemaConverter extends JsonConverter {
                     String subFieldName = field.getKey();
 
                     // TODO find a better way to do this than brute force checking the list every time?
-                    // If we have a JSONSChema list of 'required' field names,
+                    // If we have a JSONSchema list of 'required' field names,
                     // check if any of these fields are required.  This is Draft 4 JSONSChema.
                     boolean subFieldRequired = arrayNodeContainsTextValue(
                         (ArrayNode)requiredFieldList, subFieldName
