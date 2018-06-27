@@ -184,6 +184,8 @@ public class JsonSchemaConverterTest {
     public void toConnectData() throws Exception {
         SchemaAndValue connectData = converter.toConnectData(topic, recordBytes);
 
+        // TODO test that fields are normalized/sanitized.
+
         // Struct's toString uses the types and values to build a string.
         //  Assert that the returned Strings are equals, to avoid object instance comparision.
         assertEquals(expectedValue.toString(), connectData.value().toString(), "toConnectData should return exactly this value");

@@ -12,13 +12,18 @@ import java.util.regex.Pattern;
 public class JsonSchemaConverterConfig extends ConverterConfig {
     public static  final String SCHEMA_URI_FIELD_CONFIG  = "schema.uri.field";
     public static  final String SCHEMA_URI_FIELD_DEFAULT = "/meta/schema_uri";
-    private static final String SCHEMA_URI_FIELD_DOC     = "Dotted name of schema uri field in JSON message";
+    private static final String SCHEMA_URI_FIELD_DOC     = "JsonPointer path to schema URI field in JSON value";
     private static final String SCHEMA_URI_FIELD_DISPLAY = "Schema URI Field Name";
 
     public static  final String SCHEMA_URI_PREFIX_CONFIG  = "schema.uri.prefix";
     public static  final String SCHEMA_URI_PREFIX_DEFAULT = "";
     private static final String SCHEMA_URI_PREFIX_DOC     = "Prefix added to every schema.uri.field";
     private static final String SCHEMA_URI_PREFIX_DISPLAY = "Schema URI Prefix";
+
+    public static  final String SCHEMA_URI_SUFFIX_CONFIG  = "schema.uri.suffix";
+    public static  final String SCHEMA_URI_SUFFIX_DEFAULT = "";
+    private static final String SCHEMA_URI_SUFFIX_DOC     = "Suffix added to every schema.uri.field";
+    private static final String SCHEMA_URI_SUFFIX_DISPLAY = "Schema URI Suffix";
 
     public static  final String SCHEMA_URI_VERSION_REGEX_CONFIG  = "schema.uri.version.regex";
     public static  final String SCHEMA_URI_VERSION_REGEX_DEFAULT = "([\\w\\-\\./:@]+)/(?<version>\\d+)";
@@ -50,6 +55,11 @@ public class JsonSchemaConverterConfig extends ConverterConfig {
         CONFIG.define(SCHEMA_URI_PREFIX_CONFIG, Type.STRING, SCHEMA_URI_PREFIX_DEFAULT,
             Importance.HIGH, SCHEMA_URI_PREFIX_DOC, group,
             orderInGroup++, Width.MEDIUM, SCHEMA_URI_PREFIX_DISPLAY
+        );
+
+        CONFIG.define(SCHEMA_URI_SUFFIX_CONFIG, Type.STRING, SCHEMA_URI_SUFFIX_DEFAULT,
+                Importance.HIGH, SCHEMA_URI_SUFFIX_DOC, group,
+                orderInGroup++, Width.MEDIUM, SCHEMA_URI_SUFFIX_DISPLAY
         );
 
         CONFIG.define(SCHEMAS_CACHE_SIZE_CONFIG, Type.INT, SCHEMAS_CACHE_SIZE_DEFAULT,
@@ -84,6 +94,11 @@ public class JsonSchemaConverterConfig extends ConverterConfig {
     public String schemaURIPrefix() {
         return getString(SCHEMA_URI_PREFIX_CONFIG);
     }
+
+    public String schemaURISuffix() {
+        return getString(SCHEMA_URI_SUFFIX_CONFIG);
+    }
+
 
     public Pattern schemaURIVersionRegex() {
         return Pattern.compile(getString(SCHEMA_URI_VERSION_REGEX_CONFIG));

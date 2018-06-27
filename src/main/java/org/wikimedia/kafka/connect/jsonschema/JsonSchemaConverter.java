@@ -66,6 +66,8 @@ public class JsonSchemaConverter extends JsonConverter {
      * build a fully qualified URI.
      */
     private String schemaURIPrefix = JsonSchemaConverterConfig.SCHEMA_URI_PREFIX_DEFAULT;
+    private String schemaURISuffix = JsonSchemaConverterConfig.SCHEMA_URI_SUFFIX_DEFAULT;
+
 
     /**
      * Pattern regex used to extract the schema version from the schema URI.
@@ -103,6 +105,7 @@ public class JsonSchemaConverter extends JsonConverter {
         JsonSchemaConverterConfig config = new JsonSchemaConverterConfig(configs);
         schemaURIPointer        = JsonPointer.compile(config.schemaURIField());
         schemaURIPrefix         = config.schemaURIPrefix();
+        schemaURISuffix         = config.schemaURISuffix();
         schemaURIVersionPattern = config.schemaURIVersionRegex();
         cacheSize               = config.schemaCacheSize();
 
@@ -340,7 +343,7 @@ public class JsonSchemaConverter extends JsonConverter {
      */
     public URI getSchemaURI(String topic, JsonNode value) throws DataException {
         try {
-            return new URI(schemaURIPrefix + value.at(schemaURIPointer).textValue());
+            return new URI(schemaURIPrefix + value.at(schemaURIPointer).textValue() + schemaURISuffix);
         }
         catch (java.net.URISyntaxException e) {
             throw new DataException("Could not extract JSONSchema URI in field " + schemaURIPointer + " json value with prefix " + schemaURIPrefix, e);

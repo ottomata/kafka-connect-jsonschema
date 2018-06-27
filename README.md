@@ -11,6 +11,8 @@ Kafka connectors.
 
 # Usage
 
+
+
 In connect.properties:
 
 ```
@@ -26,3 +28,14 @@ get the JSONSchema for the message.  The returned JSONSchema will be parsed
 and converted into a ConnectSchema.  The value JSON data will be converted into
 a Java connect value.
 
+
+
+# Configuration Options
+
+| Name                       | Description                                                                                                                                                                              | Default                    |
+|----------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------|
+| `schema.uri.field`         | JsonPointer path to schema URI field in JSON record. This will be used to extract the JSONSchema URI for the JSON record.                                                                | `/meta/schema_uri`         |
+| `schema.uri.prefix`        | Prefix added to every `schema.uri.field`. If your schema URIs are relative, you can use this to prefix them to build a fully qualified URI.                                              | ``                         |
+| `schema.uri.suffix`        | Suffix added to every `schema.uri.field`. If your schema URIs don't include a required suffix (e.g. a file extension), you can use this to append suffix to build a fully qualified URI. | ``                         |
+| `schema.uri.version.regex` | This regex is used to extract the schema version from the schema URI. There should be a named capture group for 'version'.                                                               | `([\w\\-\\./:@]+)/(?\\d+)` |
+| `schemas.cache.size`       | The maximum number of schemas that can be cached in this converter instance.                                                                                                             | 1000                       |
