@@ -266,8 +266,11 @@ public class JsonSchemaConverter extends JsonConverter {
                     throw new DataException(fieldName + " array schema did not specify the items type");
 
                 // Arrays must only use a single type, not tuple validation.
-                if (!itemsSchema.isObject() || !itemsSchema.has("type"))
-                    throw new DataException(fieldName + " array schema must specify the items type for field, e.g. \"items\": { \"type\": \"string\"");
+                if (!itemsSchema.isObject() || !itemsSchema.has("type")) {
+                    throw new DataException(
+                        fieldName + " array schema must specify the items type for field, e.g. \"items\": { \"type\": \"string\""
+                    );
+                }
 
                 builder = SchemaBuilder.array(asConnectSchema(itemsSchema));
                 if (jsonSchema.hasNonNull(defaultField))
@@ -293,7 +296,7 @@ public class JsonSchemaConverter extends JsonConverter {
 
                     // TODO find a better way to do this than brute force checking the list every time?
                     // If we have a JSONSchema list of 'required' field names,
-                    // check if any of these fields are required.  This is Draft 4 JSONSChema.
+                    // check if any of these fields are required.  This is Draft 4+ JSONSChema.
                     boolean subFieldRequired = arrayNodeContainsTextValue(
                         (ArrayNode)requiredFieldList, subFieldName
                     );
@@ -307,7 +310,9 @@ public class JsonSchemaConverter extends JsonConverter {
                 break;
 
             default:
-                throw new DataException("Unknown schema type " + schemaTypeNode.textValue() + "in field " + fieldName);
+                throw new DataException(
+                    "Unknown schema type " + schemaTypeNode.textValue() + "in field " + fieldName
+                );
         }
 
         if (fieldName != null) {
@@ -329,12 +334,7 @@ public class JsonSchemaConverter extends JsonConverter {
         if (jsonSchema.hasNonNull(descriptionField)) {
             builder.doc(jsonSchema.get(descriptionField).textValue());
         }
-
-        // TODO Do we want to validate using factory?  Should this be configurable?
-
-
         return builder.build();
-
     }
 
 
@@ -373,9 +373,9 @@ public class JsonSchemaConverter extends JsonConverter {
             throw new DataException("Failed parsing json schema returned from " + schemaURI, e);
         }
 
-        // Use SchemaLoader so we resolve any JsonRefs in the JSONSchema.
         try {
-            // TODO get fancy andy use URITranslator to resolve relative $refs?
+            // TODO get fancy and use URITranslator to resolve relative $refs somehow?
+            // Use SchemaLoader so we resolve any JsonRefs in the JSONSchema.
             return schemaLoader.load(objectMapper.readTree(yamlParser)).getBaseNode();
         }
         catch (IOException e) {
@@ -387,7 +387,7 @@ public class JsonSchemaConverter extends JsonConverter {
      * Given the a jsonValue, this will request the JSONSchema referred to by the configured
      * schemaURI in the jsonValue and convert it to a Connect Schema.  If the schema version
      * is present in the schemaURI, the Connect Schema for the schemaURI will be cached.
-     * If it is versionless, then it will not be cached.
+     * If the schema is versionless it will not be cached.
      *
      * @param topic
      * @param jsonValue
@@ -406,6 +406,7 @@ public class JsonSchemaConverter extends JsonConverter {
         Integer schemaVersion = getSchemaVersion(topic, jsonValue);
 
         Schema connectSchema = asConnectSchema(getJsonSchema(schemaURI), schemaVersion);
+        log.trace("Converted JSONSchema at " + schemaURIString + " to Connect Schema: " + connectSchema);
 
         // Only cache this schema if the schema has a version.
         if (schemaVersion != null) {
@@ -415,6 +416,13 @@ public class JsonSchemaConverter extends JsonConverter {
         return connectSchema;
     }
 
+    /**
+     * Extracts the schema version from the schemaURI found in the JSON value.
+     *
+     * @param topic
+     * @param value
+     * @return
+     */
     public Integer getSchemaVersion(String topic, JsonNode value){
         return getSchemaVersion(topic, getSchemaURI(topic, value));
     }
@@ -434,7 +442,9 @@ public class JsonSchemaConverter extends JsonConverter {
     /**
      * Extracts the schema version from the schemaURIString using the schemaURIVersionRegex.
      *
-     * @param topic
+     * @param topic Unused here, but a subclass could override this to use the topic when
+     *              infering the schema version.
+     *
      * @param schemaURIString
      * @return
      */
@@ -449,6 +459,7 @@ public class JsonSchemaConverter extends JsonConverter {
             String versionString = versionMatcher.group("version");
             try {
                 version = Integer.parseInt(versionString);
+                log.trace("Extracted schema version " + version + " from schema URI " + schemaURIString);
             }
             catch (NumberFormatException e) {
                 throw new DataException("Failed parsing schema version " + versionString + " as an Integer.", e);
@@ -501,7 +512,9 @@ public class JsonSchemaConverter extends JsonConverter {
         if (fieldName == null)
             return fieldName;
         else {
-            return fieldName.replaceAll("(^[^A-Za-z_]|[^A-Za-z0-9_])", "_");
+            String sanitizedFieldName = fieldName.replaceAll("(^[^A-Za-z_]|[^A-Za-z0-9_])", "_");
+            log.debug("Sanitized field " + fieldName + " to " + sanitizedFieldName);
+            return sanitizedFieldName;
         }
     }
 
