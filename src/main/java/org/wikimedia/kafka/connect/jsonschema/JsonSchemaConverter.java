@@ -87,6 +87,11 @@ public class JsonSchemaConverter extends JsonConverter {
     private int cacheSize = JsonSchemaConverterConfig.SCHEMAS_CACHE_SIZE_DEFAULT;
     private boolean shouldSanitizeFieldNames = JsonSchemaConverterConfig.SANITIZE_FIELD_NAMES_DEFAULT;
 
+    // If shouldSanitizeFieldNames anything in a field name matching this regex
+    // will be replaced with sanitizeFieldReplacement.
+    private static final Pattern sanitizeFieldPattern = Pattern.compile("(^[^A-Za-z_]|[^A-Za-z0-9_])");
+    private static final String sanitizeFieldReplacement = "_";
+
     private final JsonSerializer serializer = new JsonSerializer();
     private final JsonDeserializer deserializer = new JsonDeserializer();
 
@@ -499,7 +504,7 @@ public class JsonSchemaConverter extends JsonConverter {
      * be in general a good rule for integration with
      * other downstream datastores too (e.g. SQL stores).
      *
-     * https://avro.apache.org/docs/1.8.0/spec.html#names
+     * From https://avro.apache.org/docs/1.8.0/spec.html#names
      *
      * The name portion of a fullname, record field names, and enum symbols must:
      *  start with [A-Za-z_]
@@ -512,8 +517,12 @@ public class JsonSchemaConverter extends JsonConverter {
         if (fieldName == null)
             return fieldName;
         else {
-            String sanitizedFieldName = fieldName.replaceAll("(^[^A-Za-z_]|[^A-Za-z0-9_])", "_");
-            log.debug("Sanitized field " + fieldName + " to " + sanitizedFieldName);
+            Matcher m = sanitizeFieldPattern.matcher(fieldName);
+            String sanitizedFieldName = m.find() ? m.replaceAll(sanitizeFieldReplacement) : fieldName;
+
+            if (sanitizedFieldName != fieldName)
+                log.debug("Sanitized field name " + fieldName + " to " + sanitizedFieldName);
+
             return sanitizedFieldName;
         }
     }
