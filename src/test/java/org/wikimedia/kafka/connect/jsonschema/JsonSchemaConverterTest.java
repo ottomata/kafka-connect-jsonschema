@@ -20,6 +20,8 @@ public class JsonSchemaConverterTest {
     private static final String TOPIC = "topic";
 
     JsonSchemaConverter converter = new JsonSchemaConverter();
+    JsonSchemaConverter unsanitizedConverter = new JsonSchemaConverter();
+
 
     File resourcesDirectory = new File("src/test/resources");
     String schemaURIPrefix = "file://" + resourcesDirectory.getAbsolutePath();
@@ -40,6 +42,9 @@ public class JsonSchemaConverterTest {
     static Schema expectedSchema;
     static Struct expectedValue;
 
+    static Schema expectedUnsanitizedSchema;
+    static Struct expectedUnsanitizedValue;
+
     static {
         expectedSchema = SchemaBuilder.struct()
             .name("mediawiki_revision_create")
@@ -52,6 +57,7 @@ public class JsonSchemaConverterTest {
             .field("page_id", SchemaBuilder.int64().name("page_id").optional())
             .field("rev_content_model", SchemaBuilder.string().name("rev_content_model").optional())
             .field("list_field", SchemaBuilder.array(Schema.STRING_SCHEMA).name("list_field").optional())
+            .field("bad_field_name", SchemaBuilder.string().name("bad_field_name").optional())
             .build();
 
         expectedValue = new Struct(expectedSchema.schema());
@@ -66,9 +72,39 @@ public class JsonSchemaConverterTest {
         listField.add("hi");
         listField.add("there");
         expectedValue.put("list_field", listField);
+        expectedValue.put("bad_field_name", "bad");
+
+
+
+        expectedUnsanitizedSchema = SchemaBuilder.struct()
+                .name("mediawiki/revision/create")
+                .field("meta", SchemaBuilder.struct()
+                        .name("meta").required()
+                        .field("id", SchemaBuilder.string().name("id").required())
+                        .field("dt", SchemaBuilder.string().name("dt").required())
+                        .field("schema_uri", SchemaBuilder.string().name("schema_uri").required()).build()
+                )
+                .field("page_id", SchemaBuilder.int64().name("page_id").optional())
+                .field("rev_content_model", SchemaBuilder.string().name("rev_content_model").optional())
+                .field("list_field", SchemaBuilder.array(Schema.STRING_SCHEMA).name("list_field").optional())
+                .field("bad.field name", SchemaBuilder.string().name("bad.field name").optional())
+                .build();
+
+        expectedUnsanitizedValue = new Struct(expectedUnsanitizedSchema.schema());
+        Struct metaUnsanitizedField = new Struct(expectedUnsanitizedSchema.field("meta").schema());
+        metaUnsanitizedField.put("id", "123");
+        metaUnsanitizedField.put("dt", "2018-05-22T18:23:16+00:00");
+        metaUnsanitizedField.put("schema_uri", "/schema.json");
+        expectedUnsanitizedValue.put("meta", metaUnsanitizedField);
+        expectedUnsanitizedValue.put("page_id", 1L);
+        expectedUnsanitizedValue.put("rev_content_model", "text");
+        // listField is already defined, we can reuse
+        expectedUnsanitizedValue.put("list_field", listField);
+        expectedUnsanitizedValue.put("bad.field name", "bad");
     }
 
     static String topic = "mediawiki.revision-create";
+
 
 
     public void assertSchemasEqual(Schema expected, Schema actual) {
@@ -106,6 +142,8 @@ public class JsonSchemaConverterTest {
 
         converter.configure(conf, false);
 
+        conf.put(JsonSchemaConverterConfig.SANITIZE_FIELD_NAMES_CONFIG, "false");
+        unsanitizedConverter.configure(conf, false);
 
         ObjectMapper objectMapper = new ObjectMapper();
 
@@ -187,7 +225,7 @@ public class JsonSchemaConverterTest {
         // TODO test that fields are normalized/sanitized.
 
         // Struct's toString uses the types and values to build a string.
-        //  Assert that the returned Strings are equals, to avoid object instance comparision.
+        // Assert that the returned Strings are equals, to avoid object instance comparision.
         assertEquals(expectedValue.toString(), connectData.value().toString(), "toConnectData should return exactly this value");
         assertSchemasEqual(expectedSchema, connectData.schema());
         // TODO compare data?
@@ -198,6 +236,38 @@ public class JsonSchemaConverterTest {
         SchemaAndValue connectData = converter.toConnectData(topic, recordBytes);
 
         byte[] jsonBytes = converter.fromConnectData(
+            topic,
+            connectData.schema(),
+            connectData.value()
+        );
+
+        // Assert that the json record from the original file is the same
+        // as the one that Kafka Connect converted to Connect format and then back
+        // to json string bytes.  This should be handled by the parent
+        // JsonConverter in Kafka Connect.
+
+        // Since JsonSchemaConverter sanitizes field names by default, we need to sanitize our input
+        // JSON to assert it matches the converted data.
+        String expectedJsonString = recordWithJsonSchema.toString().replaceFirst("bad\\.field name", "bad_field_name");
+        assertEquals(expectedJsonString, new String(jsonBytes));
+    }
+
+
+    /**
+     * Test that a converter configured to NOT sanitize field names will
+     * convert to and from keeping the field names exactly the same.
+     * @throws Exception
+     */
+    @Test
+    public void convertUnsanitized() throws Exception {
+
+        SchemaAndValue connectData = unsanitizedConverter.toConnectData(topic, recordBytes);
+
+        assertEquals(expectedUnsanitizedValue.toString(), connectData.value().toString(), "toConnectData should return exactly this value");
+        assertSchemasEqual(expectedUnsanitizedSchema, connectData.schema());
+
+
+        byte[] jsonBytes = unsanitizedConverter.fromConnectData(
                 topic,
                 connectData.schema(),
                 connectData.value()
@@ -209,5 +279,4 @@ public class JsonSchemaConverterTest {
         // JsonConverter in Kafka Connect.
         assertEquals(recordWithJsonSchema.toString(), new String(jsonBytes));
     }
-
 }

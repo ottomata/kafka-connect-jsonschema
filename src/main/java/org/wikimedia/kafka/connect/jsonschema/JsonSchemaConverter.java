@@ -41,7 +41,8 @@ import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.storage.ConverterConfig;
 import org.apache.kafka.connect.storage.ConverterType;
 import org.apache.kafka.connect.storage.StringConverterConfig;
-
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 /**
@@ -49,7 +50,15 @@ import org.apache.kafka.connect.storage.StringConverterConfig;
  * for the JsonNode value.  This JSONSchema is then converted into a Connect Schema,
  * which is then used to convert the JsonNode value into a Connect value Java Object.
  *
- * This class extends from JsonConverter to take advantage of its implemented
+ * Since JSON field names are possibly not compatible with many connector sinks,
+ * this class supports auto sanitizing them if configured to do so via the
+ * sanitize.field.names option. If set (the default), then bad characters like
+ * '/' or '.' will be replaced with underscores. This functionality could
+ * be in a SMT, but since it is common for JSON fields contain these bad characters,
+ * this class supports it transparently.  This makes it much easier to write
+ * schemaed JSON to Avro or Parquet or JDBC sinks.
+ *
+ * NOTE:This class extends from JsonConverter to take advantage of its implemented
  * fromConnectData() method(s).  This class copy/pastes the convertToConnect logic
  * from the parent JsonConverter, since those methods are private there.
  */
@@ -68,7 +77,6 @@ public class JsonSchemaConverter extends JsonConverter {
     private String schemaURIPrefix = JsonSchemaConverterConfig.SCHEMA_URI_PREFIX_DEFAULT;
     private String schemaURISuffix = JsonSchemaConverterConfig.SCHEMA_URI_SUFFIX_DEFAULT;
 
-
     /**
      * Pattern regex used to extract the schema version from the schema URI.
      */
@@ -77,6 +85,7 @@ public class JsonSchemaConverter extends JsonConverter {
     );
 
     private int cacheSize = JsonSchemaConverterConfig.SCHEMAS_CACHE_SIZE_DEFAULT;
+    private boolean shouldSanitizeFieldNames = JsonSchemaConverterConfig.SANITIZE_FIELD_NAMES_DEFAULT;
 
     private final JsonSerializer serializer = new JsonSerializer();
     private final JsonDeserializer deserializer = new JsonDeserializer();
@@ -91,6 +100,8 @@ public class JsonSchemaConverter extends JsonConverter {
     // However, the parent JsonConverter fromConnectSchemaCache will be.
     private Cache<String, Schema> toConnectSchemaCache;
 
+    private static final Logger log = LoggerFactory.getLogger(JsonSchemaConverter.class);
+
     // JSONSchema field names used to convert the JSONSchema to Connect Schema.
     protected static final String typeField          = "type";
     protected static final String itemsField         = "items";
@@ -103,11 +114,12 @@ public class JsonSchemaConverter extends JsonConverter {
     @Override
     public void configure(Map<String, ?> configs) {
         JsonSchemaConverterConfig config = new JsonSchemaConverterConfig(configs);
-        schemaURIPointer        = JsonPointer.compile(config.schemaURIField());
-        schemaURIPrefix         = config.schemaURIPrefix();
-        schemaURISuffix         = config.schemaURISuffix();
-        schemaURIVersionPattern = config.schemaURIVersionRegex();
-        cacheSize               = config.schemaCacheSize();
+        schemaURIPointer         = JsonPointer.compile(config.schemaURIField());
+        schemaURIPrefix          = config.schemaURIPrefix();
+        schemaURISuffix          = config.schemaURISuffix();
+        schemaURIVersionPattern  = config.schemaURIVersionRegex();
+        cacheSize                = config.schemaCacheSize();
+        shouldSanitizeFieldNames = config.shouldSanitizeFieldNames();
 
         boolean isKey = config.type() == ConverterType.KEY;
         serializer.configure(configs, isKey);
@@ -157,7 +169,7 @@ public class JsonSchemaConverter extends JsonConverter {
         Object connectValue = null;
         try {
             connectSchema = asConnectSchemaFromJsonValue(topic, jsonValue);
-            connectValue  = convertToConnect(connectSchema, jsonValue);
+            connectValue  = convertToConnect(connectSchema, jsonValue, shouldSanitizeFieldNames);
             // TODO: do we want to (configurably) validate jsonValue
             // using JsonSchema with JsonSchemaFactory???
         }
@@ -211,10 +223,8 @@ public class JsonSchemaConverter extends JsonConverter {
             return null;
 
         if (fieldName == null && jsonSchema.hasNonNull(titleField)) {
-            // TODO: make a sanitizeFieldName method?
             fieldName = jsonSchema.get(titleField).textValue();
         }
-        fieldName = sanitizeFieldName(fieldName);
 
         JsonNode schemaTypeNode = jsonSchema.get(typeField);
         if (schemaTypeNode == null || !schemaTypeNode.isTextual())
@@ -266,10 +276,6 @@ public class JsonSchemaConverter extends JsonConverter {
 
             case "object":
                 builder = SchemaBuilder.struct();
-                if (fieldName != null) {
-                    builder.name(fieldName);
-                }
-
                 JsonNode properties = jsonSchema.get(propertiesField);
 
                 if (properties == null || !properties.isObject())
@@ -291,6 +297,8 @@ public class JsonSchemaConverter extends JsonConverter {
                     boolean subFieldRequired = arrayNodeContainsTextValue(
                         (ArrayNode)requiredFieldList, subFieldName
                     );
+
+                    subFieldName = shouldSanitizeFieldNames ? sanitizeFieldName(subFieldName) : subFieldName;
                     builder.field(
                         subFieldName,
                         asConnectSchema(field.getValue(), subFieldName, subFieldRequired, null)
@@ -299,11 +307,11 @@ public class JsonSchemaConverter extends JsonConverter {
                 break;
 
             default:
-                throw new DataException("Unknown schema type: " + schemaTypeNode.textValue());
+                throw new DataException("Unknown schema type " + schemaTypeNode.textValue() + "in field " + fieldName);
         }
 
         if (fieldName != null) {
-            builder.name(fieldName);
+            builder.name(shouldSanitizeFieldNames ? sanitizeFieldName(fieldName) : fieldName);
         }
 
         if (version != null) {
@@ -322,8 +330,6 @@ public class JsonSchemaConverter extends JsonConverter {
             builder.doc(jsonSchema.get(descriptionField).textValue());
         }
 
-        // TODO: If 'additionalProperties' is present, should we infer the rest of the schema
-        // from other fields in the data?
         // TODO Do we want to validate using factory?  Should this be configurable?
 
 
@@ -477,23 +483,34 @@ public class JsonSchemaConverter extends JsonConverter {
 
     /**
      * Replaces characters in fieldName that are not suitable for
-     * field names with underscores.  I.e. [/.-\s]will be replaced.
+     * field names with underscores. This tries to conform with
+     * allowed Avro (and Parquet) field names, which should
+     * be in general a good rule for integration with
+     * other downstream datastores too (e.g. SQL stores).
+     *
+     * https://avro.apache.org/docs/1.8.0/spec.html#names
+     *
+     * The name portion of a fullname, record field names, and enum symbols must:
+     *  start with [A-Za-z_]
+     *  subsequently contain only [A-Za-z0-9_]
      *
      * @param fieldName
-     * @return
+     * @return sanitized field name
      */
-    public String sanitizeFieldName(String fieldName) {
+    public static String sanitizeFieldName(String fieldName) {
         if (fieldName == null)
             return fieldName;
         else {
-            return fieldName.replaceAll("[/\\.\\s-]", "_");
+            return fieldName.replaceAll("(^[^A-Za-z_]|[^A-Za-z0-9_])", "_");
         }
     }
 
 
     //
-    // NOTE: Code below is copy/pasted from parent JsonConverter class, since these variables
-    //       and methods are private there.
+    // NOTE: Code below is copy/pasted and modified from parent JsonConverter class,
+    //       since these variables and methods are private there and we can't override them.
+    //       They are modified to allow for sanitization of field names to remove
+    //       bad characters.
     //
 
     private static final Map<Schema.Type, JsonToConnectTypeConverter> TO_CONNECT_CONVERTERS = new EnumMap<>(Schema.Type.class);
@@ -501,49 +518,49 @@ public class JsonSchemaConverter extends JsonConverter {
     static {
         TO_CONNECT_CONVERTERS.put(Schema.Type.BOOLEAN, new JsonToConnectTypeConverter() {
             @Override
-            public Object convert(Schema schema, JsonNode value) {
+            public Object convert(Schema schema, JsonNode value, boolean shouldSanitizeFieldNames) {
                 return value.booleanValue();
             }
         });
         TO_CONNECT_CONVERTERS.put(Schema.Type.INT8, new JsonToConnectTypeConverter() {
             @Override
-            public Object convert(Schema schema, JsonNode value) {
+            public Object convert(Schema schema, JsonNode value, boolean shouldSanitizeFieldNames) {
                 return (byte) value.intValue();
             }
         });
         TO_CONNECT_CONVERTERS.put(Schema.Type.INT16, new JsonToConnectTypeConverter() {
             @Override
-            public Object convert(Schema schema, JsonNode value) {
+            public Object convert(Schema schema, JsonNode value, boolean shouldSanitizeFieldNames) {
                 return (short) value.intValue();
             }
         });
         TO_CONNECT_CONVERTERS.put(Schema.Type.INT32, new JsonToConnectTypeConverter() {
             @Override
-            public Object convert(Schema schema, JsonNode value) {
+            public Object convert(Schema schema, JsonNode value, boolean shouldSanitizeFieldNames) {
                 return value.intValue();
             }
         });
         TO_CONNECT_CONVERTERS.put(Schema.Type.INT64, new JsonToConnectTypeConverter() {
             @Override
-            public Object convert(Schema schema, JsonNode value) {
+            public Object convert(Schema schema, JsonNode value, boolean shouldSanitizeFieldNames) {
                 return value.longValue();
             }
         });
         TO_CONNECT_CONVERTERS.put(Schema.Type.FLOAT32, new JsonToConnectTypeConverter() {
             @Override
-            public Object convert(Schema schema, JsonNode value) {
+            public Object convert(Schema schema, JsonNode value, boolean shouldSanitizeFieldNames) {
                 return value.floatValue();
             }
         });
         TO_CONNECT_CONVERTERS.put(Schema.Type.FLOAT64, new JsonToConnectTypeConverter() {
             @Override
-            public Object convert(Schema schema, JsonNode value) {
+            public Object convert(Schema schema, JsonNode value, boolean shouldSanitizeFieldNames) {
                 return value.doubleValue();
             }
         });
         TO_CONNECT_CONVERTERS.put(Schema.Type.BYTES, new JsonToConnectTypeConverter() {
             @Override
-            public Object convert(Schema schema, JsonNode value) {
+            public Object convert(Schema schema, JsonNode value, boolean shouldSanitizeFieldNames) {
                 try {
                     return value.binaryValue();
                 } catch (IOException e) {
@@ -553,24 +570,24 @@ public class JsonSchemaConverter extends JsonConverter {
         });
         TO_CONNECT_CONVERTERS.put(Schema.Type.STRING, new JsonToConnectTypeConverter() {
             @Override
-            public Object convert(Schema schema, JsonNode value) {
+            public Object convert(Schema schema, JsonNode value, boolean shouldSanitizeFieldNames) {
                 return value.textValue();
             }
         });
         TO_CONNECT_CONVERTERS.put(Schema.Type.ARRAY, new JsonToConnectTypeConverter() {
             @Override
-            public Object convert(Schema schema, JsonNode value) {
+            public Object convert(Schema schema, JsonNode value, boolean shouldSanitizeFieldNames) {
                 Schema elemSchema = schema == null ? null : schema.valueSchema();
                 ArrayList<Object> result = new ArrayList<>();
                 for (JsonNode elem : value) {
-                    result.add(convertToConnect(elemSchema, elem));
+                    result.add(convertToConnect(elemSchema, elem, true));
                 }
                 return result;
             }
         });
         TO_CONNECT_CONVERTERS.put(Schema.Type.MAP, new JsonToConnectTypeConverter() {
             @Override
-            public Object convert(Schema schema, JsonNode value) {
+            public Object convert(Schema schema, JsonNode value, boolean shouldSanitizeFieldNames) {
                 Schema keySchema = schema == null ? null : schema.keySchema();
                 Schema valueSchema = schema == null ? null : schema.valueSchema();
 
@@ -584,7 +601,7 @@ public class JsonSchemaConverter extends JsonConverter {
                     Iterator<Map.Entry<String, JsonNode>> fieldIt = value.fields();
                     while (fieldIt.hasNext()) {
                         Map.Entry<String, JsonNode> entry = fieldIt.next();
-                        result.put(entry.getKey(), convertToConnect(valueSchema, entry.getValue()));
+                        result.put(entry.getKey(), convertToConnect(valueSchema, entry.getValue(), shouldSanitizeFieldNames));
                     }
                 } else {
                     if (!value.isArray())
@@ -594,8 +611,8 @@ public class JsonSchemaConverter extends JsonConverter {
                             throw new DataException("Found invalid map entry instead of array tuple: " + entry.getNodeType());
                         if (entry.size() != 2)
                             throw new DataException("Found invalid map entry, expected length 2 but found :" + entry.size());
-                        result.put(convertToConnect(keySchema, entry.get(0)),
-                                convertToConnect(valueSchema, entry.get(1)));
+                        result.put(convertToConnect(keySchema, entry.get(0), shouldSanitizeFieldNames),
+                                convertToConnect(valueSchema, entry.get(1), shouldSanitizeFieldNames));
                     }
                 }
                 return result;
@@ -603,7 +620,7 @@ public class JsonSchemaConverter extends JsonConverter {
         });
         TO_CONNECT_CONVERTERS.put(Schema.Type.STRUCT, new JsonToConnectTypeConverter() {
             @Override
-            public Object convert(Schema schema, JsonNode value) {
+            public Object convert(Schema schema, JsonNode value, boolean shouldSanitizeFieldNames) {
                 if (!value.isObject())
                     throw new DataException("Structs should be encoded as JSON objects, but found " + value.getNodeType());
 
@@ -613,8 +630,17 @@ public class JsonSchemaConverter extends JsonConverter {
                 // translation of schemas to JSON; during the more common translation of data to JSON, the call to schema.schema()
                 // just returns the schema Object and has no overhead.
                 Struct result = new Struct(schema.schema());
-                for (Field field : schema.fields())
-                    result.put(field, convertToConnect(field.schema(), value.get(field.name())));
+
+
+                Iterator<Map.Entry<String,JsonNode>> fields = value.fields();
+                while (fields.hasNext()) {
+                    Map.Entry<String, JsonNode> field = fields.next();
+
+                    String fieldName = shouldSanitizeFieldNames ? sanitizeFieldName(field.getKey()) : field.getKey();
+
+                    Field schemaField = schema.field(fieldName);
+                    result.put(schemaField, convertToConnect(schemaField.schema(), field.getValue(), shouldSanitizeFieldNames));
+                }
 
                 return result;
             }
@@ -662,7 +688,7 @@ public class JsonSchemaConverter extends JsonConverter {
         });
     }
 
-    private static Object convertToConnect(Schema schema, JsonNode jsonValue) {
+    private static Object convertToConnect(Schema schema, JsonNode jsonValue, boolean shouldSanitizeFieldNames) {
         final Schema.Type schemaType;
         if (schema != null) {
             schemaType = schema.type();
@@ -712,7 +738,7 @@ public class JsonSchemaConverter extends JsonConverter {
         if (typeConverter == null)
             throw new DataException("Unknown schema type: " + String.valueOf(schemaType));
 
-        Object converted = typeConverter.convert(schema, jsonValue);
+        Object converted = typeConverter.convert(schema, jsonValue, shouldSanitizeFieldNames);
         if (schema != null && schema.name() != null) {
             LogicalTypeConverter logicalConverter = TO_CONNECT_LOGICAL_CONVERTERS.get(schema.name());
             if (logicalConverter != null)
@@ -722,8 +748,8 @@ public class JsonSchemaConverter extends JsonConverter {
     }
 
     private interface JsonToConnectTypeConverter {
-        Object convert(Schema schema, JsonNode value);
-    }
+        Object convert(Schema schema, JsonNode value, boolean shouldSanitizeFieldNames);
+     }
 
     private interface LogicalTypeConverter {
         Object convert(Schema schema, Object value);

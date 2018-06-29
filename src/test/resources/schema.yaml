@@ -38,5 +38,8 @@ properties:
     type: array
     items:
       type: string
+  "bad.field name":
+      description: A bad field name that will be sanitized
+      type: string
 required:
 - meta

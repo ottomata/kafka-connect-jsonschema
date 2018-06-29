@@ -35,6 +35,11 @@ public class JsonSchemaConverterConfig extends ConverterConfig {
     private static final String SCHEMAS_CACHE_SIZE_DOC     = "The maximum number of schemas that can be cached in this converter instance.";
     private static final String SCHEMAS_CACHE_SIZE_DISPLAY = "Schema Cache Size";
 
+    public static  final String  SANITIZE_FIELD_NAMES_CONFIG  = "sanitize.field.names";
+    public static  final boolean SANITIZE_FIELD_NAMES_DEFAULT = true;
+    private static final String  SANITIZE_FIELD_NAMES_DOC     = "If true, bad field name characters (. / etc.) will be replaced with underscores.";
+    private static final String  SANITIZE_FIELD_NAMES_DISPLAY = "Sanitize Field Names";
+
     // always false.  Here 'schemas.enable' refers to Kafka Connect's custom envelope
     // schema, which JsonSchemaConverter does not use.  However, JsonSchemaConverter
     // extends from JsonConverter in order to not reimplement some methods that work
@@ -62,20 +67,20 @@ public class JsonSchemaConverterConfig extends ConverterConfig {
                 orderInGroup++, Width.MEDIUM, SCHEMA_URI_SUFFIX_DISPLAY
         );
 
-        CONFIG.define(SCHEMAS_CACHE_SIZE_CONFIG, Type.INT, SCHEMAS_CACHE_SIZE_DEFAULT,
-            Importance.HIGH, SCHEMAS_CACHE_SIZE_DOC, group,
-            orderInGroup++, Width.MEDIUM, SCHEMAS_CACHE_SIZE_DISPLAY
-        );
-
         CONFIG.define(SCHEMA_URI_VERSION_REGEX_CONFIG, Type.STRING, SCHEMA_URI_VERSION_REGEX_DEFAULT,
                 Importance.HIGH, SCHEMA_URI_VERSION_REGEX_DOC, group,
                 orderInGroup++, Width.MEDIUM, SCHEMA_URI_VERSION_REGEX_DISPLAY
         );
 
         // Hardcoded to false
-        CONFIG.define(SCHEMAS_ENABLE_CONFIG, Type.BOOLEAN, false,
-            Importance.HIGH, "", group,
-            orderInGroup++, Width.MEDIUM, ""
+        CONFIG.define(SANITIZE_FIELD_NAMES_CONFIG, Type.BOOLEAN, SANITIZE_FIELD_NAMES_DEFAULT,
+            Importance.HIGH, SANITIZE_FIELD_NAMES_DOC, group,
+            orderInGroup++, Width.MEDIUM, SANITIZE_FIELD_NAMES_DISPLAY
+        );
+
+        CONFIG.define(SCHEMAS_CACHE_SIZE_CONFIG, Type.INT, SCHEMAS_CACHE_SIZE_DEFAULT,
+                Importance.HIGH, SCHEMAS_CACHE_SIZE_DOC, group,
+                orderInGroup++, Width.MEDIUM, SCHEMAS_CACHE_SIZE_DISPLAY
         );
     }
 
@@ -99,16 +104,14 @@ public class JsonSchemaConverterConfig extends ConverterConfig {
         return getString(SCHEMA_URI_SUFFIX_CONFIG);
     }
 
-
     public Pattern schemaURIVersionRegex() {
         return Pattern.compile(getString(SCHEMA_URI_VERSION_REGEX_CONFIG));
     }
 
-    /**
-     * Get the cache size.
-     *
-     * @return the cache size
-     */
+    public boolean shouldSanitizeFieldNames() {
+        return getBoolean(SANITIZE_FIELD_NAMES_CONFIG);
+    }
+
     public int schemaCacheSize() {
         return getInt(SCHEMAS_CACHE_SIZE_CONFIG);
     }

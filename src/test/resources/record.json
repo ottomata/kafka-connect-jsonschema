@@ -9,5 +9,6 @@
   "list_field": [
     "hi",
     "there"
-  ]
+  ],
+  "bad.field name": "bad"
 }

@@ -9,7 +9,7 @@ Kafka connectors.
 
 JSONSchema is too comprehensive a specification to be fully supported here. This converter
 only examines the JSONSchema field types to build a Connect Schema. Fancy features
-like `additionalProperties`, `patternProperties`, ``oneOf`, `anyOf`, etc. are not supported.
+like `additionalProperties`, `patternProperties`, `oneOf`, `anyOf`, etc. are not supported.
 
 
 # Usage
@@ -55,6 +55,7 @@ a Java connect value.
 | `schema.uri.prefix`        | Prefix added to every `schema.uri.field`. If your schema URIs are relative, you can use this to prefix them to build a fully qualified URI.                                              | `""`                             |
 | `schema.uri.suffix`        | Suffix added to every `schema.uri.field`. If your schema URIs don't include a required suffix (e.g. a file extension), you can use this to append suffix to build a fully qualified URI. | `""`                             |
 | `schema.uri.version.regex` | This regex is used to capture the schema version from the schema URI. There should be a named capture group for 'version'. If no version can be captured, the schema version will be null, and the schema will not be cached. | `([\w\-\./:@]+)/(?<version>\d+)` |
+| `sanitize.field.names`     | If true, field names with bad characters like '.' and '/' will be replaced with underscores during conversion. | `true` |
 | `schemas.cache.size`       | The maximum number of schemas that can be cached in this converter instance.                                                                                                             | 1000                             |
 
 
