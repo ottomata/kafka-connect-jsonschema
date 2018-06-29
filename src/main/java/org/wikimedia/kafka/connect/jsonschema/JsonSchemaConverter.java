@@ -52,11 +52,14 @@ import org.slf4j.LoggerFactory;
  *
  * Since JSON field names are possibly not compatible with many connector sinks,
  * this class supports auto sanitizing them if configured to do so via the
- * sanitize.field.names option. If set (the default), then bad characters like
+ * sanitize.field.names option. If true (the default), then bad characters like
  * '/' or '.' will be replaced with underscores. This functionality could
  * be in a SMT, but since it is common for JSON fields contain these bad characters,
  * this class supports it transparently.  This makes it much easier to write
  * schemaed JSON to Avro or Parquet or JDBC sinks.
+ *
+ * The pattern used to replace characters is the one specificed by Avro at
+ * https://avro.apache.org/docs/1.8.0/spec.html#names
  *
  * NOTE:This class extends from JsonConverter to take advantage of its implemented
  * fromConnectData() method(s).  This class copy/pastes the convertToConnect logic
