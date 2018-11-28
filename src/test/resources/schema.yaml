@@ -34,10 +34,18 @@ properties:
     description: The content model of the revision.
     type: string
   list_field:
-    description: An list type field
+    description: A list type field
     type: array
     items:
       type: string
+  complex_list_field:
+    description: A complex list type field
+    type: array
+    items:
+      type: object
+      properties:
+        elem1:
+          type: string
   "bad.field name":
       description: A bad field name that will be sanitized
       type: string

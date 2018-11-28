@@ -38,10 +38,22 @@
       "type": "string"
     },
     "list_field": {
-      "description": "An list type field",
+      "description": "A list type field",
       "type": "array",
       "items": {
         "type": "string"
+      }
+    },
+    "complex_list_field": {
+      "description": "A complex list type field",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "elem1": {
+            "type": "string"
+          }
+        }
       }
     },
     "bad.field name": {

@@ -46,6 +46,8 @@ public class JsonSchemaConverterTest {
     static Struct expectedUnsanitizedValue;
 
     static {
+        Schema complexListElementSchema = SchemaBuilder.struct().field("elem1", SchemaBuilder.string().name("elem1").optional());
+
         expectedSchema = SchemaBuilder.struct()
             .name("mediawiki_revision_create")
             .field("meta", SchemaBuilder.struct()
@@ -57,23 +59,33 @@ public class JsonSchemaConverterTest {
             .field("page_id", SchemaBuilder.int64().name("page_id").optional())
             .field("rev_content_model", SchemaBuilder.string().name("rev_content_model").optional())
             .field("list_field", SchemaBuilder.array(Schema.STRING_SCHEMA).name("list_field").optional())
+            .field("complex_list_field", SchemaBuilder.array(complexListElementSchema).name("complex_list_field").optional())
             .field("bad_field_name", SchemaBuilder.string().name("bad_field_name").optional())
             .build();
 
         expectedValue = new Struct(expectedSchema.schema());
+
         Struct metaField = new Struct(expectedSchema.field("meta").schema());
         metaField.put("id", "123");
         metaField.put("dt", "2018-05-22T18:23:16+00:00");
         metaField.put("schema_uri", "/schema.json");
+
         expectedValue.put("meta", metaField);
         expectedValue.put("page_id", 1L);
         expectedValue.put("rev_content_model", "text");
+
         ArrayList<String> listField = new ArrayList<>();
         listField.add("hi");
         listField.add("there");
         expectedValue.put("list_field", listField);
-        expectedValue.put("bad_field_name", "bad");
 
+        ArrayList<Struct> complexListField = new ArrayList<>();
+        Struct complexListFieldElement = new Struct(complexListElementSchema);
+        complexListFieldElement.put("elem1", "complicated");
+        complexListField.add(complexListFieldElement);
+        expectedValue.put("complex_list_field", complexListField);
+
+        expectedValue.put("bad_field_name", "bad");
 
 
         expectedUnsanitizedSchema = SchemaBuilder.struct()
@@ -87,6 +99,7 @@ public class JsonSchemaConverterTest {
                 .field("page_id", SchemaBuilder.int64().name("page_id").optional())
                 .field("rev_content_model", SchemaBuilder.string().name("rev_content_model").optional())
                 .field("list_field", SchemaBuilder.array(Schema.STRING_SCHEMA).name("list_field").optional())
+                .field("complex_list_field", SchemaBuilder.array(complexListElementSchema).name("complex_list_field").optional())
                 .field("bad.field name", SchemaBuilder.string().name("bad.field name").optional())
                 .build();
 
@@ -98,8 +111,9 @@ public class JsonSchemaConverterTest {
         expectedUnsanitizedValue.put("meta", metaUnsanitizedField);
         expectedUnsanitizedValue.put("page_id", 1L);
         expectedUnsanitizedValue.put("rev_content_model", "text");
-        // listField is already defined, we can reuse
+        // listField and complexListField are already defined, we can reuse
         expectedUnsanitizedValue.put("list_field", listField);
+        expectedUnsanitizedValue.put("complex_list_field", complexListField);
         expectedUnsanitizedValue.put("bad.field name", "bad");
     }
 

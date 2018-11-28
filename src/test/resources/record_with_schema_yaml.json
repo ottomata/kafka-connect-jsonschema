@@ -10,5 +10,8 @@
     "hi",
     "there"
   ],
+  "complex_list_field": [
+    { "elem1": "complicated" }
+  ],
   "bad.field name": "bad"
 }
