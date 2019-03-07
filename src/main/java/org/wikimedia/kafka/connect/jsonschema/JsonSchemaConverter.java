@@ -72,6 +72,7 @@ public class JsonSchemaConverter extends JsonConverter {
     private JsonPointer schemaURIPointer = JsonPointer.compile(
         JsonSchemaConverterConfig.SCHEMA_URI_FIELD_DEFAULT
     );
+    private String schemaURIFallback = JsonSchemaConverterConfig.SCHEMA_URI_FALLBACK_DEFAULT;
 
     /**
      * This will be prefixed to every URI extracted from each JSON value to
@@ -79,6 +80,7 @@ public class JsonSchemaConverter extends JsonConverter {
      */
     private String schemaURIPrefix = JsonSchemaConverterConfig.SCHEMA_URI_PREFIX_DEFAULT;
     private String schemaURISuffix = JsonSchemaConverterConfig.SCHEMA_URI_SUFFIX_DEFAULT;
+
 
     /**
      * Pattern regex used to extract the schema version from the schema URI.
@@ -123,6 +125,7 @@ public class JsonSchemaConverter extends JsonConverter {
     public void configure(Map<String, ?> configs) {
         JsonSchemaConverterConfig config = new JsonSchemaConverterConfig(configs);
         schemaURIPointer         = JsonPointer.compile(config.schemaURIField());
+        schemaURIFallback        = config.schemaURIFallback();
         schemaURIPrefix          = config.schemaURIPrefix();
         schemaURISuffix          = config.schemaURISuffix();
         schemaURIVersionPattern  = config.schemaURIVersionRegex();
@@ -356,12 +359,28 @@ public class JsonSchemaConverter extends JsonConverter {
      * @throws DataException
      */
     public URI getSchemaURI(String topic, JsonNode value) throws DataException {
+        JsonNode schemaURINode = value.at(schemaURIPointer);
+        String schemaURI = schemaURINode.textValue();
+
+        if (schemaURI == null || schemaURI.isEmpty()) {
+            if (schemaURIFallback.isEmpty()) {
+                throw new DataException("Could not extract JSONSchema URI in field " + schemaURIPointer +
+                                        ": value missing or empty and no fallback configured");
+            } else {
+                schemaURI = schemaURIFallback;
+            }
+        }
+
+        schemaURI = schemaURIPrefix + schemaURI + schemaURISuffix;
         try {
-            return new URI(schemaURIPrefix + value.at(schemaURIPointer).textValue() + schemaURISuffix);
+            return new URI(schemaURI);
         }
         catch (java.net.URISyntaxException e) {
-            throw new DataException("Could not extract JSONSchema URI in field " + schemaURIPointer + " json value with prefix " + schemaURIPrefix, e);
+            throw new DataException("Could not extract JSONSchema URI in field " + schemaURIPointer +
+                                    ": invalid value " + schemaURI, e);
         }
+
+
     }
 
     /**

@@ -40,6 +40,11 @@ public class JsonSchemaConverterConfig extends ConverterConfig {
     private static final String  SANITIZE_FIELD_NAMES_DOC     = "If true, bad field name characters (. / etc.) will be replaced with underscores.";
     private static final String  SANITIZE_FIELD_NAMES_DISPLAY = "Sanitize Field Names";
 
+    public static  final String SCHEMA_URI_FALLBACK_CONFIG  = "schema.uri.fallback";
+    public static  final String SCHEMA_URI_FALLBACK_DEFAULT = "";
+    private static final String SCHEMA_URI_FALLBACK_DOC     = "Static schema URI to fallback to if missing from message";
+    private static final String SCHEMA_URI_FALLBACK_DISPLAY = "Schema URI Fallback Value";
+
     // always false.  Here 'schemas.enable' refers to Kafka Connect's custom envelope
     // schema, which JsonSchemaConverter does not use.  However, JsonSchemaConverter
     // extends from JsonConverter in order to not reimplement some methods that work
@@ -82,6 +87,12 @@ public class JsonSchemaConverterConfig extends ConverterConfig {
                 Importance.HIGH, SCHEMAS_CACHE_SIZE_DOC, group,
                 orderInGroup++, Width.MEDIUM, SCHEMAS_CACHE_SIZE_DISPLAY
         );
+
+        CONFIG.define(SCHEMA_URI_FALLBACK_CONFIG, Type.STRING, SCHEMA_URI_FALLBACK_DEFAULT,
+                Importance.HIGH, SCHEMA_URI_FALLBACK_DOC, group,
+                orderInGroup++, Width.MEDIUM, SCHEMA_URI_FALLBACK_DISPLAY
+        );
+
     }
 
     public static ConfigDef configDef() {
@@ -114,5 +125,9 @@ public class JsonSchemaConverterConfig extends ConverterConfig {
 
     public int schemaCacheSize() {
         return getInt(SCHEMAS_CACHE_SIZE_CONFIG);
+    }
+
+    public String schemaURIFallback() {
+        return getString(SCHEMA_URI_FALLBACK_CONFIG);
     }
 }
