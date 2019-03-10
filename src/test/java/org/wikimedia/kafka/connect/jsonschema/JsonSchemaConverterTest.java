@@ -142,7 +142,7 @@ public class JsonSchemaConverterTest {
 
         Map<String, Object> conf = new HashMap<>();
         conf.put(JsonSchemaConverterConfig.SCHEMA_URI_PREFIX_CONFIG, schemaURIPrefix);
-        conf.put(JsonSchemaConverterConfig.SCHEMA_URI_FALLBACK_CONFIG, "/fallback.json");
+        conf.put(JsonSchemaConverterConfig.SCHEMA_URI_FALLBACK_CONFIG, "/fallback/${topic}.json");
 
         converter.configure(conf, false);
 
@@ -181,7 +181,7 @@ public class JsonSchemaConverterTest {
             converter.getSchemaURI(topic, recordWithYamlSchema).toString()
         );
         assertEquals(
-            schemaURIPrefix + "/fallback.json",
+            schemaURIPrefix + "/fallback/" + topic + ".json",
             converter.getSchemaURI(topic, recordWithoutSchema).toString()
         );
     }

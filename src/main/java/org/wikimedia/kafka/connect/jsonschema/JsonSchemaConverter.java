@@ -20,6 +20,7 @@ import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.github.fge.jsonschema.core.load.SchemaLoader;
 
 import com.fasterxml.jackson.dataformat.yaml.YAMLParser;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.common.cache.Cache;
 import org.apache.kafka.common.cache.LRUCache;
 import org.apache.kafka.common.cache.SynchronizedCache;
@@ -43,6 +44,8 @@ import org.apache.kafka.connect.storage.ConverterType;
 import org.apache.kafka.connect.storage.StringConverterConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 
 /**
@@ -348,7 +351,26 @@ public class JsonSchemaConverter extends JsonConverter {
         return builder.build();
     }
 
+    /**
+     * Ensures a schema URI for a message is available. Fall back to static configuration if needed.
+     *
+     * @param schemaURI      The schema URI from the message, possibly null
+     * @param topic          The topic of the message
+     * @return               A non-null, non-empty schema URI
+     * @throws DataException If neither the provided schema URI nor the fallback are valid
+     */
+    protected String applySchemaURIFallback(@Nullable String schemaURI, String topic) throws DataException {
+        if (StringUtils.isEmpty(schemaURI)) {
+            if (StringUtils.isEmpty(schemaURIFallback)) {
+                throw new DataException("Could not extract JSONSchema URI in field " + schemaURIPointer +
+                                        ": value missing or empty and no fallback configured");
+            }
 
+            return StringUtils.replace(schemaURIFallback, "${topic}", topic);
+        }
+
+        return schemaURI;
+    }
 
     /**
      * Extracts the json value's JSONSchema URI from the schemaURIPointer json pointer.
@@ -360,16 +382,7 @@ public class JsonSchemaConverter extends JsonConverter {
      */
     public URI getSchemaURI(String topic, JsonNode value) throws DataException {
         JsonNode schemaURINode = value.at(schemaURIPointer);
-        String schemaURI = schemaURINode.textValue();
-
-        if (schemaURI == null || schemaURI.isEmpty()) {
-            if (schemaURIFallback.isEmpty()) {
-                throw new DataException("Could not extract JSONSchema URI in field " + schemaURIPointer +
-                                        ": value missing or empty and no fallback configured");
-            } else {
-                schemaURI = schemaURIFallback;
-            }
-        }
+        String schemaURI = applySchemaURIFallback(schemaURINode.textValue(), topic);
 
         schemaURI = schemaURIPrefix + schemaURI + schemaURISuffix;
         try {
@@ -379,8 +392,6 @@ public class JsonSchemaConverter extends JsonConverter {
             throw new DataException("Could not extract JSONSchema URI in field " + schemaURIPointer +
                                     ": invalid value " + schemaURI, e);
         }
-
-
     }
 
     /**
