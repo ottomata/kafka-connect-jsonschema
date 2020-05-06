@@ -33,9 +33,12 @@ public class JsonSchemaConverterTest {
     // The record in this file has its schema_uri set to a .yaml file.
     File recordFileWithYamlSchema = new File("src/test/resources/record_with_schema_yaml.json");
 
+    File recordFileWithoutSchema = new File("src/test/resources/record_without_schema.json");
+
     byte[]   recordBytes;
     JsonNode recordWithJsonSchema;
     JsonNode recordWithYamlSchema;
+    JsonNode recordWithoutSchema;
     JsonNode schemaJson;
     JsonNode schemaYaml;
 
@@ -153,6 +156,7 @@ public class JsonSchemaConverterTest {
 
         Map<String, Object> conf = new HashMap<>();
         conf.put(JsonSchemaConverterConfig.SCHEMA_URI_PREFIX_CONFIG, schemaURIPrefix);
+        conf.put(JsonSchemaConverterConfig.SCHEMA_URI_FALLBACK_CONFIG, "/fallback/${topic}.json");
 
         converter.configure(conf, false);
 
@@ -163,10 +167,12 @@ public class JsonSchemaConverterTest {
 
         schemaJson  = objectMapper.readTree(schemaFileJson);
         recordBytes = Files.readAllBytes(recordFileWithJsonSchema.toPath());
-        recordWithJsonSchema      = objectMapper.readTree(recordFileWithJsonSchema);
+        recordWithJsonSchema = objectMapper.readTree(recordFileWithJsonSchema);
 
         schemaYaml  = objectMapper.readTree(new YAMLFactory().createParser(schemaFileYaml));
         recordWithYamlSchema = objectMapper.readTree(recordFileWithYamlSchema);
+
+        recordWithoutSchema = objectMapper.readTree(recordFileWithoutSchema);
     }
 
 
@@ -187,6 +193,10 @@ public class JsonSchemaConverterTest {
         assertEquals(
             schemaURIPrefix + "/schema.yaml",
             converter.getSchemaURI(topic, recordWithYamlSchema).toString()
+        );
+        assertEquals(
+            schemaURIPrefix + "/fallback/" + topic + ".json",
+            converter.getSchemaURI(topic, recordWithoutSchema).toString()
         );
     }
 
